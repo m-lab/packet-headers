@@ -19,8 +19,8 @@ only TCP packets get sent to the packet-headers daemon.
 
 To fulfil its obligations (a per-flow file containing the UUID) packet-headers
 will need an addition to the tcp-info service.  In this addition, packet-headers
-will connect as a client to a well-specified port on localhost that is served by
-tcp-info.  Whenever a new stream begins or ends, the tcp-info system will post the
+will connect as a client to a well-specified port on localhost or a unix-domain socket
+that is served by tcp-info.  Whenever a new stream begins or ends, the tcp-info system will post the
 5-tuple of the stream and its UUID on the open connection.  In this way, the
 packet-headers system will learn about new connections from the kernel, which is
 the only true authority about what is and isn't a new connection.  It will also
