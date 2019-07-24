@@ -3,7 +3,7 @@
 The packet-headers service provides a binary which collects PCAP headers for all
 incoming TCP flows and saves each stream of packet captures into a per-stream
 file where the filename is the [UUID](https://github.com/m-lab/uuid) of the TCP
-flow.
+flow.  It should only save the packet headers, and it should zero out enough parts of the client IP address in each header to ensure client anonymity.
 
 ## Design
 
