@@ -8,6 +8,7 @@ import (
 
 func TestMetrics(t *testing.T) {
 	MissedPackets.WithLabelValues("x").Inc()
-	FlowSaveErrors.WithLabelValues("x").Inc()
+	SaverErrors.WithLabelValues("x").Inc()
+	SaverCount.WithLabelValues("x").Inc()
 	promtest.LintMetrics(t)
 }
