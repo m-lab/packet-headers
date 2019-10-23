@@ -15,6 +15,18 @@ var (
 		},
 		[]string{"saverstate"},
 	)
+	UnknownFlowsClosed = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "pcap_unknown_flows_closed_total",
+			Help: "How many flows have been closed that we never saw opened.",
+		},
+	)
+
+	// Savers are internal data structures each with a signle associated
+	// goroutine, that are allocated and run once for each connection. Their
+	// start and stop is counted in SaversStarted and SaversStopped, their
+	// errors in SaverErrors, and the current state of all running Savers is in
+	// SaverCount.
 	SaversStarted = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "pcap_saver_starts_total",
@@ -40,12 +52,6 @@ var (
 			Help: "How many savers are currently in each state",
 		},
 		[]string{"state"},
-	)
-	UnknownFlowsClosed = promauto.NewCounter(
-		prometheus.CounterOpts{
-			Name: "pcap_unknown_flows_closed_total",
-			Help: "How many flows have been closed that we never saw opened.",
-		},
 	)
 
 // TODO: Create histograms for:
