@@ -1,12 +1,14 @@
 language: go
 
+install:
+- go get -v -t ./...
+
 before_script:
 - go get github.com/mattn/goveralls
 
 script:
-- golint ./... || true
-- go vet ./... || true
-- go get -t ./...
+- golint ./...
+- go vet ./...
 - go build ./...
 - go test ./... -cover=1 -coverprofile=_c.cov
 - $GOPATH/bin/goveralls -service=travis-ci -coverprofile=_c.cov
