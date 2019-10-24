@@ -1,7 +1,7 @@
 language: go
 
 install:
-- apt-get install libpcap-dev
+- sudo apt-get update && sudo apt-get install -y libpcap-dev
 - go get -v -t ./...
 
 before_script:
