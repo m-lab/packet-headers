@@ -87,9 +87,9 @@ func (s *status) Get() string {
 	return s.status
 }
 
-// Saver provides two channels to allow packets to be saved. A well-buffered
+// TCP provides two channels to allow packets to be saved. A well-buffered
 // channel for packets and a channel to receive the UUID.
-type Saver struct {
+type TCP struct {
 	// Pchan is the channel down which pointers to packets will be sent.
 	Pchan chan<- gopacket.Packet
 	// UUIDChan is the channel that receives UUIDs with timestamps.
@@ -108,43 +108,43 @@ type Saver struct {
 }
 
 // Increment the error counter when errors are encountered.
-func (s *Saver) error(cause string) {
-	s.state.Set(cause + "error")
+func (t *TCP) error(cause string) {
+	t.state.Set(cause + "error")
 	metrics.SaverErrors.WithLabelValues(cause).Inc()
 }
 
 // Start the process of reading the data and saving it to a file.
-func (s *Saver) start(ctx context.Context, duration time.Duration) {
+func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	metrics.SaversStarted.Inc()
 	defer metrics.SaversStopped.Inc()
-	defer s.state.Done()
+	defer t.state.Done()
 
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
 	// First read the UUID
-	s.state.Set("uuidwait")
+	t.state.Set("uuidwait")
 	var uuidEvent UUIDEvent
 	select {
-	case uuidEvent = <-s.uuidchanRead:
+	case uuidEvent = <-t.uuidchanRead:
 	case <-ctx.Done():
 		log.Println("PCAP capture cancelled with no UUID")
-		s.error("uuid")
+		t.error("uuid")
 		return
 	}
 
 	// Create a file and directory based on the UUID and the time.
-	s.state.Set("filecreation")
-	dir, fname := filename(s.dir, uuidEvent)
+	t.state.Set("filecreation")
+	dir, fname := filename(t.dir, uuidEvent)
 	err := os.MkdirAll(dir, 0777)
 	if err != nil {
 		log.Println("Could not create directory", dir, err)
-		s.error("mkdir")
+		t.error("mkdir")
 		return
 	}
 	f, err := os.Create(path.Join(dir, fname))
 	if err != nil {
-		s.error("create")
+		t.error("create")
 		return
 	}
 	defer f.Close()
@@ -152,11 +152,11 @@ func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	// Write PCAP data to the new file.
 	w := pcapgo.NewWriterNanos(f)
 	// Now save packets until the stream is done or the context is canceled.
-	s.state.Set("readingpackets")
+	t.state.Set("readingpackets")
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
-	p, ok := s.readPacket(derivedCtx)
+	p, ok := t.readPacket(derivedCtx)
 	if !ok {
-		s.error("nopackets")
+		t.error("nopackets")
 		return
 	}
 	headerLen := len(p.Data())
@@ -168,70 +168,75 @@ func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	//
 	// This algorithm assumes that IPv6 header lengths are stable for a given
 	// flow.
-	al := p.ApplicationLayer()
-	if al != nil {
-		alSize := len(al.LayerContents())
-		headerLen -= alSize
+	nl := p.NetworkLayer()
+	if nl != nil {
+		nlPayloadSize := len(nl.LayerPayload())
+		headerLen -= nlPayloadSize
 	}
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
-	s.savePacket(w, p, headerLen)
+	t.savePacket(w, p, headerLen)
 	for {
-		p, ok := s.readPacket(derivedCtx)
-		if ok {
-			s.savePacket(w, p, headerLen)
-		} else {
+		p, ok := t.readPacket(derivedCtx)
+		if !ok {
 			break
 		}
+		t.savePacket(w, p, headerLen)
 	}
 	f.Close()
-	s.state.Set("discardingpackets")
+	t.state.Set("discardingpackets")
 	// Now read until the channel is closed or the passed-in context is cancelled.
 	keepDiscarding := true
 	for keepDiscarding {
-		_, keepDiscarding = s.readPacket(derivedCtx)
+		_, keepDiscarding = t.readPacket(derivedCtx)
 	}
 }
 
-func (s *Saver) readPacket(ctx context.Context) (gopacket.Packet, bool) {
+func (t *TCP) readPacket(ctx context.Context) (gopacket.Packet, bool) {
 	select {
-	case p, ok := <-s.pchanRead:
+	case p, ok := <-t.pchanRead:
 		return p, ok
 	case <-ctx.Done():
 		return nil, false
 	}
 }
 
-func (s *Saver) savePacket(w *pcapgo.Writer, p gopacket.Packet, headerLen int) {
+func (t *TCP) savePacket(w *pcapgo.Writer, p gopacket.Packet, headerLen int) {
 	// First we make sure not to save things we should not.
-	anonymizePacket(s.anon, p)
+	anonymizePacket(t.anon, p)
 
 	// By design, pcaps capture packets by saving the first N bytes of each
 	// packet. Because we can't be sure how big a header will be before we have
 	// observed the flow, we have set N to be large and we trim packets down
-	// here to not waste space when saving them to disk.
+	// here to not waste space when saving them to disk and to prevent any
+	// privacy leaks from application layer data getting saved to .pcap files.
 	//
 	// CaptureInfo.CaptureLength specifies the saved length of the captured
 	// packet. It is distinct from the packet length, because it is how many
-	// bytes are actully saved in the data returned from the pcap system, rather
-	// than how many bytes the packet claims to be. The pcap system does not
-	// generate captured packets with a CaptureLen larger than the packet size.
+	// bytes are actually returned from the pcap system, rather than how many
+	// bytes the packet claims to be. The pcap system does not generate captured
+	// packets with a CaptureLen larger than the packet size.
 	info := p.Metadata().CaptureInfo
 	info.CaptureLength = minInt(info.CaptureLength, headerLen)
-	w.WritePacket(info, p.Data()[:headerLen])
+	data := p.Data()
+	if len(data) > headerLen {
+		data = data[:headerLen]
+	}
+	w.WritePacket(info, data)
 }
 
 // State returns the state of the saver in a form suitable for use as a label
 // value in a prometheus vector.
-func (s *Saver) State() string {
-	return s.state.Get()
+func (t *TCP) State() string {
+	return t.state.Get()
 }
 
-// newSaver makes a new Saver but does not start it. It is here as its own
+// newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
-func newSaver(dir string, anon anonymize.IPAnonymizer) *Saver {
+func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 	// With a 1500 byte MTU, this is a ~1 second buffer at a line rate of 10Gbps:
-	// 10e9 bits/second * 1 second * 1/8 bytes/bit * 1/1500 packets/byte = 833333.3 packets
+	//  10e9 bits/second * 1 second * 1/8 bytes/bit * 1/1500 packets/byte = 833333.3 packets
+	// In the worst case, where full packets are captured, this corresponds to 1.25GB of memory.
 	//
 	// If synchronization between UUID creation and packet collection is off by
 	// more than a second, things are messed up.
@@ -241,7 +246,7 @@ func newSaver(dir string, anon anonymize.IPAnonymizer) *Saver {
 	// capacity of 1 means that the write should never block.
 	uuidchan := make(chan UUIDEvent, 1)
 
-	return &Saver{
+	return &TCP{
 		Pchan:     pchan,
 		pchanRead: pchan,
 
@@ -254,13 +259,15 @@ func newSaver(dir string, anon anonymize.IPAnonymizer) *Saver {
 	}
 }
 
-// StartNew creates a new Saver to save a single TCP flow and starts its
-// goroutine. A saver's goroutine can be stopped either by cancelling the
-// passed-in context or by closing the Pchan channel. Closing Pchan is the
-// preferred method, because it is an unambiguous signal that no more packets
-// should be expected for that flow.
-func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, maxDuration time.Duration) *Saver {
-	s := newSaver(dir, anon)
+// StartNew creates a new saver.TCP to save a single TCP flow and starts its
+// goroutine. The goroutine can be stopped either by cancelling the passed-in
+// context or by closing the Pchan channel. Closing Pchan is the preferred
+// method, because it is an unambiguous signal that no more packets should be
+// expected for that flow.
+//
+// It is the caller's responsibility to close Pchan or cancel the context.
+func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, maxDuration time.Duration) *TCP {
+	s := newTCP(dir, anon)
 	go s.start(ctx, maxDuration)
 	return s
 }

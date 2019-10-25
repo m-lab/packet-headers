@@ -2,7 +2,6 @@ package saver
 
 import (
 	"context"
-	"encoding/hex"
 	"io/ioutil"
 	"log"
 	"net"
@@ -18,7 +17,20 @@ import (
 	"github.com/m-lab/go/rtx"
 )
 
-func TestAnonymization(t *testing.T) {
+func TestMinInt(t *testing.T) {
+	for _, c := range []struct{ x, y, want int }{
+		{1, 0, 0},
+		{1, 1, 1},
+		{0, 1, 0},
+		{0, 0, 0},
+	} {
+		if minInt(c.x, c.y) != c.want {
+			t.Errorf("Bad minInt (%+v)", c)
+		}
+	}
+}
+
+func TestAnonymizationWontCrashOnNil(t *testing.T) {
 	a := anonymize.New(anonymize.Netblock)
 
 	// Try to anonymize packets with no IP data.
@@ -37,33 +49,8 @@ func TestAnonymization(t *testing.T) {
 		gopacket.Default)
 	anonymizePacket(a, ethOnlyPacket) // No crash == success
 
-	// Again, but now with actual IPv4 data in the packet.
-	buf = gopacket.NewSerializeBuffer()
-	ipv4 := &layers.IPv4{}
-	// Hand-modified packet data from wireshark for 10.101.236.44 -> 10.211.118.21
-	// IPs have been changed to prevent exposure of internal IPs.
-	ipv4bytes, err := hex.DecodeString("4500006c489b4000400618770a65ec2c0ad37615")
-	rtx.Must(err, "Could not decode byte string")
-	rtx.Must(ipv4.DecodeFromBytes(ipv4bytes, gopacket.NilDecodeFeedback), "Could not reify v4 packet")
-	gopacket.SerializeLayers(buf, opts, ipv4)
-	ipv4Packet := gopacket.NewPacket(
-		buf.Bytes(),
-		layers.LayerTypeIPv4,
-		gopacket.Default)
-	if ipv4Packet.NetworkLayer().(*layers.IPv4).SrcIP.String() != "10.101.236.44" {
-		t.Error("Failed to reify srcIP:", ipv4Packet.NetworkLayer().(*layers.IPv4).SrcIP.String())
-	}
-	if ipv4Packet.NetworkLayer().(*layers.IPv4).DstIP.String() != "10.211.118.21" {
-		t.Error("Failed to reify dstIP:", ipv4Packet.NetworkLayer().(*layers.IPv4).DstIP.String())
-	}
-	// Perform the anonymization
-	anonymizePacket(a, ipv4Packet)
-	if ipv4Packet.NetworkLayer().(*layers.IPv4).SrcIP.String() != "10.101.236.0" {
-		t.Error("Failed to anonymize srcIP:", ipv4Packet.NetworkLayer().(*layers.IPv4).SrcIP.String())
-	}
-	if ipv4Packet.NetworkLayer().(*layers.IPv4).DstIP.String() != "10.211.118.0" {
-		t.Error("Failed to anonymize dstIP:", ipv4Packet.NetworkLayer().(*layers.IPv4).DstIP.String())
-	}
+	// All other cases are tested by the TestSaverWithRealv4Data and
+	// TestSaverWithRealv6Data cases later.
 }
 
 type statusTracker struct {
@@ -92,7 +79,7 @@ func TestSaverDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newSaver(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None))
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -129,7 +116,7 @@ func TestSaverNoUUID(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newSaver(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None))
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -154,7 +141,7 @@ func TestSaverCantMkdir(t *testing.T) {
 	rtx.Must(os.Chmod(dir, 0111), "Could not chmod dir to unwriteable")
 	defer os.RemoveAll(dir)
 
-	s := newSaver(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None))
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -178,7 +165,7 @@ func TestSaverCantCreate(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newSaver(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None))
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -199,8 +186,8 @@ func TestSaverCantCreate(t *testing.T) {
 	}
 }
 
-func TestSaverWithRealData(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverWithRealData")
+func TestSaverWithRealv4Data(t *testing.T) {
+	dir, err := ioutil.TempDir("", "TestSaverWithRealv4Data")
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
@@ -215,7 +202,7 @@ func TestSaverWithRealData(t *testing.T) {
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
-		handle, err := pcap.OpenOffline("test.pcap")
+		handle, err := pcap.OpenOffline("testv4.pcap")
 		rtx.Must(err, "Could not open golden pcap file")
 		ps := gopacket.NewPacketSource(handle, handle.LinkType())
 		// Send packets down the packet channel
@@ -238,9 +225,98 @@ func TestSaverWithRealData(t *testing.T) {
 	for p := range ps.Packets() {
 		// Verify that each packet has had its payload zeroed out.
 		packets = append(packets, p)
+		// Verify that each packet has had its payload zeroed out.
+		pl := p.NetworkLayer().LayerPayload()
+		for _, b := range pl {
+			if b != 0 {
+				t.Error("The payload of the packet", p, "was supposed to be zeroed out")
+			}
+		}
 	}
-	if len(packets) != 4 {
-		t.Error("Bad length (should be 4):", len(packets))
+	if len(packets) != 12 {
+		t.Error("Bad length (should be 12):", len(packets))
+	}
+	for _, p := range packets {
+		al := p.ApplicationLayer()
+		if al == nil {
+			continue
+		}
+		data := al.LayerContents()
+		for _, b := range data {
+			if b != 0 {
+				t.Error("All application layer data is supposed to be zeroed, but was not in", p)
+				break
+			}
+		}
+		srcIP := p.NetworkLayer().(*layers.IPv4).SrcIP.To4()
+		if srcIP[3] == 0 {
+			t.Error("Last byte of v4 addr should be zero")
+		}
+		for b := range srcIP[:3] {
+			if b == 0 {
+				t.Error("No low-end v4 address bytes should be zeroed out")
+			}
+		}
+		dstIP := p.NetworkLayer().(*layers.IPv4).DstIP.To4()
+		if dstIP[3] == 0 {
+			t.Error("Last byte of v4 addr should be zero")
+		}
+		for b := range dstIP[:3] {
+			if b != 0 {
+				t.Error("No low-end v4 address bytes should be zeroed out")
+			}
+		}
+	}
+}
+
+func TestSaverWithRealv6Data(t *testing.T) {
+	dir, err := ioutil.TempDir("", "TestSaverWithRealv6Data")
+	rtx.Must(err, "Could not create tempdir")
+	defer os.RemoveAll(dir)
+
+	// Send a UUID and then some packets.
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 10*time.Second)
+
+	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
+	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
+
+	go func() {
+		// Get packets from a wireshark-produced pcap file.
+		handle, err := pcap.OpenOffline("testv6.pcap")
+		rtx.Must(err, "Could not open golden pcap file")
+		ps := gopacket.NewPacketSource(handle, handle.LinkType())
+		// Send packets down the packet channel
+		for p := range ps.Packets() {
+			s.Pchan <- p
+		}
+		// Stop the saver.
+		close(s.Pchan)
+	}()
+
+	for s.State() != "stopped" {
+		time.Sleep(time.Millisecond)
+	}
+
+	log.Println("reading data from", dir+"/2000/01/02/testUUID.pcap")
+	handle, err := pcap.OpenOffline(dir + "/2000/01/02/testUUID.pcap")
+	rtx.Must(err, "Could not open written pcap file")
+	ps := gopacket.NewPacketSource(handle, handle.LinkType())
+	var packets []gopacket.Packet
+	for p := range ps.Packets() {
+		packets = append(packets, p)
+		// Verify that each packet has had its payload zeroed out.
+		pl := p.NetworkLayer().LayerPayload()
+		for _, b := range pl {
+			if b != 0 {
+				t.Error("The payload of the packet", p, "was supposed to be zeroed out")
+			}
+		}
+	}
+	if len(packets) != 8 {
+		t.Error("Bad length (should be 8):", len(packets))
 	}
 	for _, p := range packets {
 		al := p.ApplicationLayer()
@@ -255,13 +331,19 @@ func TestSaverWithRealData(t *testing.T) {
 			}
 		}
 		srcIP := p.NetworkLayer().(*layers.IPv6).SrcIP
-		for b := range srcIP[16:] {
+		if srcIP[0] == 0 {
+			t.Error("First byte of v6 addr should not be zero")
+		}
+		for b := range srcIP[15:] {
 			if b != 0 {
 				t.Error("All high-end v6 address bytes should be zeroed out")
 			}
 		}
-		dstIP := p.NetworkLayer().(*layers.IPv6).DstIP
-		for b := range dstIP[16:] {
+		dstIP := p.NetworkLayer().(*layers.IPv4).DstIP
+		if dstIP[0] == 0 {
+			t.Error("First byte of v6 addr should not be zero")
+		}
+		for b := range dstIP[15:] {
 			if b != 0 {
 				t.Error("All high-end v6 address bytes should be zeroed out")
 			}
