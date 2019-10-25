@@ -36,10 +36,10 @@ func anonymizePacket(a anonymize.IPAnonymizer, p gopacket.Packet) {
 		return
 	}
 	switch nl.LayerType() {
-	case ((*layers.IPv4)(nil)).LayerType():
+	case layers.LayerTypeIPv4:
 		a.IP(nl.(*layers.IPv4).SrcIP)
 		a.IP(nl.(*layers.IPv4).DstIP)
-	case ((*layers.IPv6)(nil)).LayerType():
+	case layers.LayerTypeIPv6:
 		a.IP(nl.(*layers.IPv6).SrcIP)
 		a.IP(nl.(*layers.IPv6).DstIP)
 	}
@@ -58,6 +58,7 @@ func filename(dir string, e UUIDEvent) (string, string) {
 
 type statusSetter interface {
 	Set(status string)
+	Done()
 	Get() string
 }
 
@@ -75,6 +76,11 @@ func (s *status) Set(newstatus string) {
 	oldstatus, s.status = s.status, newstatus
 	metrics.SaverCount.WithLabelValues(oldstatus).Dec()
 	metrics.SaverCount.WithLabelValues(newstatus).Inc()
+}
+
+func (s *status) Done() {
+	s.status = "stopped"
+	metrics.SaverCount.WithLabelValues(s.status).Dec()
 }
 
 func (s *status) Get() string {
@@ -111,7 +117,7 @@ func (s *Saver) error(cause string) {
 func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	metrics.SaversStarted.Inc()
 	defer metrics.SaversStopped.Inc()
-	defer s.state.Set("stopped")
+	defer s.state.Done()
 
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
@@ -157,7 +163,11 @@ func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	// Now we try to discover the correct header length for the flow by
 	// discovering the size of the application layer and then subtracting it
 	// from the overall size of the packet data. IPv6 supports variable-length
-	// headers, so this is actually required.
+	// headers (unlike IPv4, where the length of the IPv4 header is
+	// well-defined), so this is actually required.
+	//
+	// This algorithm assumes that IPv6 header lengths are stable for a given
+	// flow.
 	al := p.ApplicationLayer()
 	if al != nil {
 		alSize := len(al.LayerContents())
@@ -193,9 +203,21 @@ func (s *Saver) readPacket(ctx context.Context) (gopacket.Packet, bool) {
 }
 
 func (s *Saver) savePacket(w *pcapgo.Writer, p gopacket.Packet, headerLen int) {
+	// First we make sure not to save things we should not.
+	anonymizePacket(s.anon, p)
+
+	// By design, pcaps capture packets by saving the first N bytes of each
+	// packet. Because we can't be sure how big a header will be before we have
+	// observed the flow, we have set N to be large and we trim packets down
+	// here to not waste space when saving them to disk.
+	//
+	// CaptureInfo.CaptureLength specifies the saved length of the captured
+	// packet. It is distinct from the packet length, because it is how many
+	// bytes are actully saved in the data returned from the pcap system, rather
+	// than how many bytes the packet claims to be. The pcap system does not
+	// generate captured packets with a CaptureLen larger than the packet size.
 	info := p.Metadata().CaptureInfo
 	info.CaptureLength = minInt(info.CaptureLength, headerLen)
-	anonymizePacket(s.anon, p)
 	w.WritePacket(info, p.Data()[:headerLen])
 }
 

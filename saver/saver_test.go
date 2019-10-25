@@ -79,6 +79,10 @@ func (s *statusTracker) Set(state string) {
 	s.status = state
 }
 
+func (s *statusTracker) Done() {
+	s.Set("stopped")
+}
+
 func (s *statusTracker) Get() string {
 	return s.status
 }
@@ -86,7 +90,7 @@ func (s *statusTracker) Get() string {
 func TestSaverDryRun(t *testing.T) {
 	dir, err := ioutil.TempDir("", "TestSaverDryRun")
 	rtx.Must(err, "Could not create tempdir")
-	//defer os.RemoveAll(dir)
+	defer os.RemoveAll(dir)
 
 	s := newSaver(dir, anonymize.New(anonymize.None))
 	tracker := statusTracker{status: s.state.Get()}
