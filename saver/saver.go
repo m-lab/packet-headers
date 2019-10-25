@@ -65,6 +65,11 @@ type status struct {
 	status string
 }
 
+func newStatus(beginstate string) *status {
+	metrics.SaverCount.WithLabelValues(beginstate).Inc()
+	return &status{beginstate}
+}
+
 func (s *status) Set(newstatus string) {
 	var oldstatus string
 	oldstatus, s.status = s.status, newstatus
@@ -79,18 +84,12 @@ func (s *status) Get() string {
 // Saver provides two channels to allow packets to be saved. A well-buffered
 // channel for packets and a channel to receive the UUID.
 type Saver struct {
-	// Pchan is the channel down which pointers to packets will be sent. No
-	// client should ever perform a blocking write to this channel, and if a
-	// client holds onto the channel for longer than a millisecond, it risks the
-	// channel being closed out from underneath it. Nothing that uses the Pchan
-	// channel of a Saver should hold onto that channel for longer than it takes
-	// to attempt to write a single record.
-	Pchan    chan<- gopacket.Packet
+	// Pchan is the channel down which pointers to packets will be sent.
+	Pchan chan<- gopacket.Packet
+	// UUIDChan is the channel that receives UUIDs with timestamps.
 	UUIDchan chan<- UUIDEvent
 
-	// The internal-only readable channels. Until the Saver is stopped, the
-	// Pchan write channel is connected to the Pchan channel. After things are
-	// stopped, that connection is broken.
+	// The internal-only readable channels.
 	pchanRead    <-chan gopacket.Packet
 	uuidchanRead <-chan UUIDEvent
 
@@ -114,12 +113,8 @@ func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	defer metrics.SaversStopped.Inc()
 	defer s.state.Set("stopped")
 
-	ctx, s.cancel = context.WithTimeout(ctx, duration)
-	defer s.cancel()
-	go func() {
-		<-ctx.Done()
-		s.Stop()
-	}()
+	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
+	defer derivedCancel()
 
 	// First read the UUID
 	s.state.Set("uuidwait")
@@ -153,7 +148,7 @@ func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	// Now save packets until the stream is done or the context is canceled.
 	s.state.Set("readingpackets")
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
-	p, ok := <-s.pchanRead
+	p, ok := s.readPacket(derivedCtx)
 	if !ok {
 		s.error("nopackets")
 		return
@@ -171,8 +166,29 @@ func (s *Saver) start(ctx context.Context, duration time.Duration) {
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
 	s.savePacket(w, p, headerLen)
-	for p := range s.pchanRead {
-		s.savePacket(w, p, headerLen)
+	for {
+		p, ok := s.readPacket(derivedCtx)
+		if ok {
+			s.savePacket(w, p, headerLen)
+		} else {
+			break
+		}
+	}
+	f.Close()
+	s.state.Set("discardingpackets")
+	// Now read until the channel is closed or the passed-in context is cancelled.
+	keepDiscarding := true
+	for keepDiscarding {
+		_, keepDiscarding = s.readPacket(derivedCtx)
+	}
+}
+
+func (s *Saver) readPacket(ctx context.Context) (gopacket.Packet, bool) {
+	select {
+	case p, ok := <-s.pchanRead:
+		return p, ok
+	case <-ctx.Done():
+		return nil, false
 	}
 }
 
@@ -181,32 +197,6 @@ func (s *Saver) savePacket(w *pcapgo.Writer, p gopacket.Packet, headerLen int) {
 	info.CaptureLength = minInt(info.CaptureLength, headerLen)
 	anonymizePacket(s.anon, p)
 	w.WritePacket(info, p.Data()[:headerLen])
-}
-
-// Stop the saver, causing it to write its data to disk and close all open
-// files. After this is called, no channel in this saver will ever be read from
-// again. The saver should subsequently be allowed to pass out of scope, so that
-// the garbage collector will close all open channels and reclaim all the
-// resources of this saver.
-func (s *Saver) Stop() {
-	s.stopOnce.Do(func() {
-		if s.cancel != nil {
-			s.cancel()
-		}
-		oldchan := s.Pchan
-		// All future writes should go to a channel that has no capacity and will
-		// never be read from.
-		s.Pchan = make(chan gopacket.Packet)
-		go func() {
-			// Lose all race conditions, because saver requires that nobody hold
-			// onto the Pchan channel for more than a millisecond.
-			time.Sleep(time.Millisecond)
-
-			// Tell the packet channel that the currently buffered data is all there
-			// will ever be.
-			close(oldchan)
-		}()
-	})
 }
 
 // State returns the state of the saver in a form suitable for use as a label
@@ -218,9 +208,6 @@ func (s *Saver) State() string {
 // newSaver makes a new Saver but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
 func newSaver(dir string, anon anonymize.IPAnonymizer) *Saver {
-	beginstate := "notstarted"
-	metrics.SaverCount.WithLabelValues(beginstate).Inc()
-
 	// With a 1500 byte MTU, this is a ~1 second buffer at a line rate of 10Gbps:
 	// 10e9 bits/second * 1 second * 1/8 bytes/bit * 1/1500 packets/byte = 833333.3 packets
 	//
@@ -240,12 +227,16 @@ func newSaver(dir string, anon anonymize.IPAnonymizer) *Saver {
 		uuidchanRead: uuidchan,
 
 		dir:   dir,
-		state: &status{beginstate},
+		state: newStatus("notstarted"),
 		anon:  anon,
 	}
 }
 
-// StartNew creates a new Saver to save a single TCP flow and starts its goroutine.
+// StartNew creates a new Saver to save a single TCP flow and starts its
+// goroutine. A saver's goroutine can be stopped either by cancelling the
+// passed-in context or by closing the Pchan channel. Closing Pchan is the
+// preferred method, because it is an unambiguous signal that no more packets
+// should be expected for that flow.
 func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, maxDuration time.Duration) *Saver {
 	s := newSaver(dir, anon)
 	go s.start(ctx, maxDuration)

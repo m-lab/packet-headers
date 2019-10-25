@@ -104,7 +104,7 @@ func TestSaverDryRun(t *testing.T) {
 		for s.state.Get() != "readingpackets" && ctx.Err() == nil {
 			time.Sleep(1 * time.Millisecond)
 		}
-		s.Stop()
+		cancel()
 	}()
 
 	s.start(ctx, 10*time.Second) // Give the disk IO 10 seconds to happen.
@@ -129,7 +129,9 @@ func TestSaverNoUUID(t *testing.T) {
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
-	s.start(context.Background(), 10*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	s.start(ctx, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
 		past:   []string{"notstarted", "uuidwait", "uuiderror"},
@@ -217,10 +219,13 @@ func TestSaverWithRealData(t *testing.T) {
 			s.Pchan <- p
 		}
 		// Stop the saver.
-		s.Stop()
+		close(s.Pchan)
 	}()
 
-	s.start(ctx, 10*time.Second)
+	for s.State() != "stopped" {
+		time.Sleep(time.Millisecond)
+	}
+
 	log.Println("reading data from", dir+"/2000/01/02/testUUID.pcap")
 	handle, err := pcap.OpenOffline(dir + "/2000/01/02/testUUID.pcap")
 	rtx.Must(err, "Could not open written pcap file")
