@@ -202,7 +202,7 @@ func TestSaverWithRealv4Data(t *testing.T) {
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
-		handle, err := pcap.OpenOffline("testv4.pcap")
+		handle, err := pcap.OpenOffline("../testdata/v4.pcap")
 		rtx.Must(err, "Could not open golden pcap file")
 		ps := gopacket.NewPacketSource(handle, handle.LinkType())
 		// Send packets down the packet channel
@@ -285,7 +285,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
-		handle, err := pcap.OpenOffline("testv6.pcap")
+		handle, err := pcap.OpenOffline("../testdata/v6.pcap")
 		rtx.Must(err, "Could not open golden pcap file")
 		ps := gopacket.NewPacketSource(handle, handle.LinkType())
 		// Send packets down the packet channel
