@@ -79,8 +79,8 @@ func (s *status) Set(newstatus string) {
 }
 
 func (s *status) Done() {
-	s.status = "stopped"
 	metrics.SaverCount.WithLabelValues(s.status).Dec()
+	s.status = "stopped"
 }
 
 func (s *status) Get() string {
