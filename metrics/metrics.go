@@ -77,20 +77,5 @@ var (
 		},
 	)
 
-// TODO: Create histograms for:
-//
-// time spent by savers in unknown state
-// amount of data buffered before being "opened". (maybe - how do you poll a channel for its buffer usage?)
-//
-// TODO: Create histograms for:
-//
-// p0 - time PH first seeing a flow
-// t0 - time tcpinfo sees a flow (Timestamp of event)
-// p1 - time PH gets open signal from tcpinfo.
-//
-// avg(p0 - t0) expected to be a small constant
-// avg(p1 - t0) expected to be much less than 3sec
-//
-// ^ Those avgs seem like sensitive SLIs.
-
+// TODO(https://github.com/m-lab/packet-headers/issues/5) Create some histograms for SLIs
 )
