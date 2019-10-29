@@ -14,7 +14,8 @@ import (
 
 // FullFlow characterizes a TCP/IP flow without judgement about what direction
 // the flow is. The lexicographically lowest IP/Port combination should always
-// be first.
+// be first. It is not meant to be human-readable, and is instead only designed
+// to be used as a key in a map.
 type FullFlow struct {
 	lo, hi   string
 	loP, hiP uint16
@@ -61,7 +62,7 @@ type Demuxer struct {
 	// We use a generational GC. Every time the GC timer advances, we garbage
 	// collect all savers in oldFlows and make all the currentFlows into
 	// oldFlows. It is only through this garbage collection process that
-	// connections are closed.
+	// saver.TCP objects are finalized.
 	currentFlows map[FullFlow]*saver.TCP
 	oldFlows     map[FullFlow]*saver.TCP
 
@@ -108,7 +109,7 @@ func (d *Demuxer) savePacket(ctx context.Context, packet gopacket.Packet) {
 	}
 }
 
-func (d *Demuxer) sendUUID(ctx context.Context, ev UUIDEvent) {
+func (d *Demuxer) assignUUID(ctx context.Context, ev UUIDEvent) {
 	metrics.DemuxerUUIDCount.Inc()
 	s := d.getSaver(ctx, ev.Flow)
 	select {
@@ -156,8 +157,8 @@ func (d *Demuxer) CapturePackets(ctx context.Context, packets <-chan gopacket.Pa
 			// Get a packet and save it.
 			d.savePacket(ctx, packet)
 		case ev = <-d.uuidReadChan:
-			// We are being about a new uuid
-			d.sendUUID(ctx, ev)
+			// We are being told about a new uuid
+			d.assignUUID(ctx, ev)
 		case <-gcTicker:
 			// Time to advance the generational garbage collector.
 			d.collectGarbage()

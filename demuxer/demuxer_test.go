@@ -38,10 +38,13 @@ func TestDemuxerDryRun(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	d := New(anonymize.New(anonymize.None), dir, time.Second)
+
+	// While we have a demuxer created, make sure that the processing path for
+	// packets does not crash when given a nil packet.
+	d.savePacket(context.Background(), nil) // No crash == success
+
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	cancel()
-
-	d.savePacket(ctx, nil) // No crash == success
 
 	pChan := make(chan gopacket.Packet)
 	gcTimer := make(chan time.Time)
@@ -75,37 +78,64 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 	handle, err := pcap.OpenOffline("../testdata/v4.pcap")
 	rtx.Must(err, "Could not open golden pcap file")
 	ps := gopacket.NewPacketSource(handle, handle.LinkType())
-	var f1, f2 FullFlow
-	f1packets := make([]gopacket.Packet, 0)
+	var flow1, flow2 FullFlow
+	flow1packets := make([]gopacket.Packet, 0)
 	for p := range ps.Packets() {
-		f1 = fromPacket(p)
-		f1packets = append(f1packets, p)
+		flow1 = fromPacket(p)
+		flow1packets = append(flow1packets, p)
 	}
 
 	handle, err = pcap.OpenOffline("../testdata/v6.pcap")
 	rtx.Must(err, "Could not open golden pcap file")
 	ps = gopacket.NewPacketSource(handle, handle.LinkType())
+	flow2packets := make([]gopacket.Packet, 0)
 	for p := range ps.Packets() {
-		f2 = fromPacket(p)
-		pChan <- p
+		flow2 = fromPacket(p)
+		flow2packets = append(flow2packets, p)
 	}
+
+	// Now that we have the packets, we want to test:
+	// 1. packets arriving before the UUID
+	// 2. UUID arriving before packets
+	// 3. packets arriving after one round of GC
+	// 4. packets for two different flows arriving intermingled
+	// 5. that GC will close old flows but not new flows
+	//
+	// So we:
+	// (a) send the uuid for flow 1,
+	// (b) send some packets for flow 1,
+	// (c) send all packets for flow 2,
+	// (d) send the uuid for flow 2,
+	// (e) call GC,
+	// (f) send the rest of the packets for flow 1.
+	// (g) call GC again
+	//
+	// 1 is tested by (c,d)
+	// 2 is tested by (a,b)
+	// 3 is tested by (e,f)
+	// 4 is tested by (b,d,f)
+	// 5 is tested by (a,b,c,d,e,f,g)
 
 	d.UUIDChan <- UUIDEvent{
 		UUIDEvent: saver.UUIDEvent{
 			UUID:      "flow1",
 			Timestamp: time.Date(2013, time.October, 31, 1, 2, 3, 4, time.UTC),
 		},
-		Flow: f1,
+		Flow: flow1,
 	}
-	pChan <- f1packets[0]
-	pChan <- f1packets[1]
+	pChan <- flow1packets[0]
+	pChan <- flow1packets[1]
+
+	for _, p := range flow2packets {
+		pChan <- p
+	}
 
 	d.UUIDChan <- UUIDEvent{
 		UUIDEvent: saver.UUIDEvent{
 			UUID:      "flow2",
 			Timestamp: time.Date(2013, time.October, 30, 1, 2, 3, 4, time.UTC),
 		},
-		Flow: f2,
+		Flow: flow2,
 	}
 
 	// Busy-wait until both files appear on disk.
@@ -121,22 +151,23 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 	// cause the flows to become oldFlows.
 	time.Sleep(100 * time.Millisecond)
 	gc <- time.Now()
-	// Send a bunch of packets to cause one of the flows to become a newflow.
-	for _, p := range f1packets[2:] {
+	// Send a the rest of the flow1 packets to ensure flow 1 is not garbage collected.
+	for _, p := range flow1packets[2:] {
 		pChan <- p
 	}
-	// Lose all race conditions, then fire the GC to cause one flows to become
-	// an oldFlows and the other to be garbage collected.
+	// Lose all race conditions, then fire the GC to cause one flow to become an
+	// oldFlow and the other to be garbage collected.
 	time.Sleep(100 * time.Millisecond)
 	gc <- time.Now()
+	// Lose all race conditions again.
 	time.Sleep(100 * time.Millisecond)
 	// Verify that one flow was garbage collected.
 	if len(d.oldFlows) != 1 || len(d.currentFlows) != 0 {
 		t.Errorf("Should have 1 old flow, not %d and 0 currentFlows not %d", len(d.oldFlows), len(d.currentFlows))
 	}
+	gc <- time.Now()
 	time.Sleep(100 * time.Millisecond)
 	cancel()
-
 	wg.Wait()
 
 	// Verify the files' contents.
@@ -162,12 +193,15 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 		t.Errorf("%+v should have length 8 not %d", v6, len(v6))
 	}
 
-	// After all that, double-check that writes to an out-of-capacity Pchan will not block.
-	s := d.getSaver(ctx, f1)
+	// After all that, also check that writes to an out-of-capacity Pchan will
+	// not block.
+	s := d.getSaver(ctx, flow1)
 	close(s.Pchan)
 	close(s.UUIDchan)
-	s.Pchan = make(chan gopacket.Packet) // This will never be read.
-	d.savePacket(ctx, f1packets[0])
+	// This new channel assigned to s.Pchan will never be read, so if a blocking
+	// write is performed then this goroutine will block.
+	s.Pchan = make(chan gopacket.Packet)
+	d.savePacket(ctx, flow1packets[0])
 	// If this doesn't block, then success!
 }
 
