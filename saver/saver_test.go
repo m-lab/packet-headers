@@ -135,6 +135,29 @@ func TestSaverNoUUID(t *testing.T) {
 	}
 }
 
+func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
+	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
+	rtx.Must(err, "Could not create tempdir")
+	defer os.RemoveAll(dir)
+
+	s := newTCP(dir, anonymize.New(anonymize.None))
+	tracker := statusTracker{status: s.state.Get()}
+	s.state = &tracker
+
+	close(s.UUIDchan)
+	s.start(context.Background(), 10*time.Second)
+	expected := statusTracker{
+		status: "stopped",
+		past:   []string{"notstarted", "uuidwait", "uuidchanerror"},
+	}
+	if !reflect.DeepEqual(&tracker, &expected) {
+		t.Errorf("%+v != %+v", &tracker, &expected)
+	}
+	if s.State() != "stopped" {
+		t.Errorf("%s != 'stopped'", s.State())
+	}
+}
+
 func TestSaverCantMkdir(t *testing.T) {
 	dir, err := ioutil.TempDir("", "TestSaverCantMkdir")
 	rtx.Must(err, "Could not create tempdir")
