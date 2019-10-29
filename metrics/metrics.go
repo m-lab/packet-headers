@@ -66,7 +66,7 @@ var (
 	DemuxerGCLatency = promauto.NewHistogram(
 		prometheus.HistogramOpts{
 			Name:    "pcap_demuxer_gc_latency_seconds",
-			Help:    "How long has each GC call taken, and how many GC calls have their been.",
+			Help:    "How long has each GC call taken, and how many GC calls have there been.",
 			Buckets: prometheus.ExponentialBuckets(.000001, 2, 20), // Start at 1 microsecond and work our way up to 1 second.
 		},
 	)
