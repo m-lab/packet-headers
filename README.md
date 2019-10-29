@@ -1,4 +1,5 @@
 # packet-headers
+[![Version](https://img.shields.io/github/tag/m-lab/packet-headers.svg)](https://github.com/m-lab/packet-headers/releases) [![Build Status](https://travis-ci.org/m-lab/packet-headers.svg?branch=master)](https://travis-ci.org/m-lab/packet-headers) [![Coverage Status](https://coveralls.io/repos/m-lab/packet-headers/badge.svg?branch=master)](https://coveralls.io/github/m-lab/packet-headers?branch=master) [![GoDoc](https://godoc.org/github.com/m-lab/packet-headers?status.svg)](https://godoc.org/github.com/m-lab/packet-headers) [![Go Report Card](https://goreportcard.com/badge/github.com/m-lab/packet-headers)](https://goreportcard.com/report/github.com/m-lab/packet-headers)
 
 The packet-headers service provides a binary which collects PCAP headers for all
 incoming TCP flows and saves each stream of packet captures into a per-stream
