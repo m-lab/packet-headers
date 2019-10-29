@@ -125,10 +125,16 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	// First read the UUID
 	t.state.Set("uuidwait")
 	var uuidEvent UUIDEvent
+	var ok bool
 	select {
-	case uuidEvent = <-t.uuidchanRead:
+	case uuidEvent, ok = <-t.uuidchanRead:
+		if !ok {
+			log.Println("UUID channel closed, PCAP capture cancelled with no UUID")
+			t.error("uuidchan")
+			return
+		}
 	case <-ctx.Done():
-		log.Println("PCAP capture cancelled with no UUID")
+		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
 		t.error("uuid")
 		return
 	}
