@@ -78,7 +78,7 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 	handle, err := pcap.OpenOffline("../testdata/v4.pcap")
 	rtx.Must(err, "Could not open golden pcap file")
 	ps := gopacket.NewPacketSource(handle, handle.LinkType())
-	var flow1, flow2 FullFlow
+	var flow1, flow2 FlowKey
 	flow1packets := make([]gopacket.Packet, 0)
 	for p := range ps.Packets() {
 		flow1 = fromPacket(p)
@@ -207,7 +207,7 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 
 func TestUUIDWontBlock(t *testing.T) {
 	// The flow in question...
-	f := FullFlow{
+	f := FlowKey{
 		lo:  "ip1",
 		hi:  "ip2",
 		loP: 1,

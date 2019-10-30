@@ -16,7 +16,7 @@ import (
 // UUID of new flows.
 type UUIDEvent struct {
 	saver.UUIDEvent
-	Flow FullFlow
+	Flow FlowKey
 }
 
 // Demuxer sends each received TCP/IP packet to the proper saver. If the packet
@@ -32,8 +32,8 @@ type Demuxer struct {
 	// collect all savers in oldFlows and make all the currentFlows into
 	// oldFlows. It is only through this garbage collection process that
 	// saver.TCP objects are finalized.
-	currentFlows map[FullFlow]*saver.TCP
-	oldFlows     map[FullFlow]*saver.TCP
+	currentFlows map[FlowKey]*saver.TCP
+	oldFlows     map[FlowKey]*saver.TCP
 
 	// Variables required for the construction of new Savers
 	maxDuration time.Duration
@@ -42,7 +42,7 @@ type Demuxer struct {
 }
 
 // GetSaver returns a saver with channels for packets and a uuid.
-func (d *Demuxer) getSaver(ctx context.Context, flow FullFlow) *saver.TCP {
+func (d *Demuxer) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 	// Read the flow from the flows map, the oldFlows map, or create it.
 	t, ok := d.currentFlows[flow]
 	if !ok {
@@ -93,7 +93,7 @@ func (d *Demuxer) collectGarbage() {
 	defer timer.ObserveDuration()
 
 	// Collect garbage in a separate goroutine.
-	go func(toBeDeleted map[FullFlow]*saver.TCP) {
+	go func(toBeDeleted map[FlowKey]*saver.TCP) {
 		for _, s := range toBeDeleted {
 			close(s.UUIDchan)
 			close(s.Pchan)
@@ -101,7 +101,7 @@ func (d *Demuxer) collectGarbage() {
 	}(d.oldFlows)
 	// Advance the generation.
 	d.oldFlows = d.currentFlows
-	d.currentFlows = make(map[FullFlow]*saver.TCP)
+	d.currentFlows = make(map[FlowKey]*saver.TCP)
 }
 
 // CapturePackets captures the packets from the channel `packets` and hands them
@@ -146,8 +146,8 @@ func New(anon anonymize.IPAnonymizer, dataDir string, maxFlowDuration time.Durat
 		UUIDChan:     uuidc,
 		uuidReadChan: uuidc,
 
-		currentFlows: make(map[FullFlow]*saver.TCP),
-		oldFlows:     make(map[FullFlow]*saver.TCP),
+		currentFlows: make(map[FlowKey]*saver.TCP),
+		oldFlows:     make(map[FlowKey]*saver.TCP),
 
 		anon:        anon,
 		dataDir:     dataDir,

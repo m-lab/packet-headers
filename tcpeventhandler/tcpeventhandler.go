@@ -41,7 +41,7 @@ func (h *handler) Open(timestamp time.Time, uuid string, id *inetdiag.SockID) {
 	}
 	// Can't use a struct literal here due to embedding.
 	ev := demuxer.UUIDEvent{}
-	ev.Flow = demuxer.FullFlowFrom4Tuple(srcIP, id.SPort, dstIP, id.DPort)
+	ev.Flow = demuxer.FlowKeyFrom4Tuple(srcIP, id.SPort, dstIP, id.DPort)
 	ev.UUID = uuid
 	ev.Timestamp = timestamp
 	h.uuidChan <- ev
