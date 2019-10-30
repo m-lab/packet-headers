@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-lab/go/prometheusx"
+
 	"github.com/google/gopacket/pcap"
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/tcp-info/eventsocket"
@@ -44,6 +46,8 @@ func TestMainSmokeTest(t *testing.T) {
 		mainCancel()
 	}()
 
+	// Listen on any port for metrics.
+	*prometheusx.ListenAddress = ":0"
 	main()
 	// No crash and successful termination == success
 }

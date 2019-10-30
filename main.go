@@ -27,7 +27,8 @@ var (
 	eventSocket     = flag.String("eventsocket", "", "The absolute pathname of the unix-domain socket to which events will be posted.")
 	captureDuration = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
 	flowTimeout     = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
-	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be of arbitrary length but in practice seem to be under 128) getting truncated.")
+	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
+	netInterface    = flag.String("interface", "eth0", "The interface on which to capture packets.")
 
 	// Context and injected variables to allow smoke testing of main()
 	mainCtx, mainCancel = context.WithCancel(context.Background())
@@ -60,7 +61,7 @@ func main() {
 	}()
 
 	// Open a packet capture
-	handle, err := pcapOpenLive("eth0", int32(*maxHeaderSize), true, pcap.BlockForever)
+	handle, err := pcapOpenLive(*netInterface, int32(*maxHeaderSize), true, pcap.BlockForever)
 	rtx.Must(err, "Could not create libpcap client")
 	rtx.Must(handle.SetBPFFilter("tcp"), "Could not set up BPF filter for TCP")
 	// Stop packet capture when the context is canceled.

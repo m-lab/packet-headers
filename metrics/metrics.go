@@ -78,10 +78,10 @@ var (
 		},
 	)
 
-	BadMsgFromTCPInfo = promauto.NewCounterVec(
+	BadEventsFromTCPInfo = promauto.NewCounterVec(
 		prometheus.CounterOpts{
-			Name: "pcap_tcpeventhandler_bad_msgs_total",
-			Help: "How many unparseable IP addresses have been sent from tcp-info. This should always be zero.",
+			Name: "pcap_tcpeventhandler_bad_events_total",
+			Help: "How many unparseable events have been sent from tcp-info. This should always be zero.",
 		},
 		[]string{"reason"},
 	)

@@ -29,14 +29,14 @@ type handler struct {
 // Open processes an Open message for a new flow, sending its UUID to the demuxer.
 func (h *handler) Open(timestamp time.Time, uuid string, id *inetdiag.SockID) {
 	if id == nil {
-		metrics.BadMsgFromTCPInfo.WithLabelValues("nilid").Inc()
+		metrics.BadEventsFromTCPInfo.WithLabelValues("nilid").Inc()
 		return
 	}
 	srcIP := net.ParseIP(id.SrcIP)
 	dstIP := net.ParseIP(id.DstIP)
 	if srcIP == nil || dstIP == nil {
 		log.Printf("SrcIP: %s -> %s, DstIP: %s -> %s", id.SrcIP, srcIP, id.DstIP, dstIP)
-		metrics.BadMsgFromTCPInfo.WithLabelValues("badip").Inc()
+		metrics.BadEventsFromTCPInfo.WithLabelValues("badip").Inc()
 		return
 	}
 	// Can't use a struct literal here due to embedding.
