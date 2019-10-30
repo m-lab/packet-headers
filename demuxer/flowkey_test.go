@@ -5,7 +5,7 @@ import (
 	"testing"
 )
 
-func TestFullFlowFrom4Tuple(t *testing.T) {
+func TestFlowKeyFrom4Tuple(t *testing.T) {
 	tests := []struct {
 		name    string
 		srcIP   net.IP
@@ -44,8 +44,8 @@ func TestFullFlowFrom4Tuple(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			f1 := FullFlowFrom4Tuple(tt.srcIP, tt.srcPort, tt.dstIP, tt.dstPort)
-			f2 := FullFlowFrom4Tuple(tt.dstIP, tt.dstPort, tt.srcIP, tt.srcPort)
+			f1 := FlowKeyFrom4Tuple(tt.srcIP, tt.srcPort, tt.dstIP, tt.dstPort)
+			f2 := FlowKeyFrom4Tuple(tt.dstIP, tt.dstPort, tt.srcIP, tt.srcPort)
 			if f1 != f2 {
 				t.Errorf("%+v != %+v", f1, f2)
 			}

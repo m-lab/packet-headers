@@ -16,15 +16,15 @@ import (
 // UUID of new flows.
 type UUIDEvent struct {
 	saver.UUIDEvent
-	Flow FullFlow
+	Flow FlowKey
 }
 
-// Demuxer sends each received TCP/IP packet to the proper saver. If the packet
+// TCP sends each received TCP/IP packet to the proper saver. If the packet
 // is not a TCP/IP packet, then the demuxer will drop it.
 //
-// Note for those editing this code: Demuxer methods are NOT threadsafe to avoid
-// needing a lock in the main packet processing loop.
-type Demuxer struct {
+// Note for those editing this code: demuxer.TCP methods are NOT threadsafe to
+// avoid needing a lock in the main packet processing loop.
+type TCP struct {
 	UUIDChan     chan<- UUIDEvent
 	uuidReadChan <-chan UUIDEvent
 
@@ -32,8 +32,8 @@ type Demuxer struct {
 	// collect all savers in oldFlows and make all the currentFlows into
 	// oldFlows. It is only through this garbage collection process that
 	// saver.TCP objects are finalized.
-	currentFlows map[FullFlow]*saver.TCP
-	oldFlows     map[FullFlow]*saver.TCP
+	currentFlows map[FlowKey]*saver.TCP
+	oldFlows     map[FlowKey]*saver.TCP
 
 	// Variables required for the construction of new Savers
 	maxDuration time.Duration
@@ -42,7 +42,7 @@ type Demuxer struct {
 }
 
 // GetSaver returns a saver with channels for packets and a uuid.
-func (d *Demuxer) getSaver(ctx context.Context, flow FullFlow) *saver.TCP {
+func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 	// Read the flow from the flows map, the oldFlows map, or create it.
 	t, ok := d.currentFlows[flow]
 	if !ok {
@@ -62,7 +62,7 @@ func (d *Demuxer) getSaver(ctx context.Context, flow FullFlow) *saver.TCP {
 }
 
 // savePacket saves a packet to the appropriate saver.TCP
-func (d *Demuxer) savePacket(ctx context.Context, packet gopacket.Packet) {
+func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 	if packet == nil || packet.NetworkLayer() == nil || packet.TransportLayer() == nil {
 		metrics.DemuxerBadPacket.Inc()
 		return
@@ -78,7 +78,7 @@ func (d *Demuxer) savePacket(ctx context.Context, packet gopacket.Packet) {
 	}
 }
 
-func (d *Demuxer) assignUUID(ctx context.Context, ev UUIDEvent) {
+func (d *TCP) assignUUID(ctx context.Context, ev UUIDEvent) {
 	metrics.DemuxerUUIDCount.Inc()
 	s := d.getSaver(ctx, ev.Flow)
 	select {
@@ -88,12 +88,12 @@ func (d *Demuxer) assignUUID(ctx context.Context, ev UUIDEvent) {
 	}
 }
 
-func (d *Demuxer) collectGarbage() {
+func (d *TCP) collectGarbage() {
 	timer := prometheus.NewTimer(metrics.DemuxerGCLatency)
 	defer timer.ObserveDuration()
 
 	// Collect garbage in a separate goroutine.
-	go func(toBeDeleted map[FullFlow]*saver.TCP) {
+	go func(toBeDeleted map[FlowKey]*saver.TCP) {
 		for _, s := range toBeDeleted {
 			close(s.UUIDchan)
 			close(s.Pchan)
@@ -101,7 +101,7 @@ func (d *Demuxer) collectGarbage() {
 	}(d.oldFlows)
 	// Advance the generation.
 	d.oldFlows = d.currentFlows
-	d.currentFlows = make(map[FullFlow]*saver.TCP)
+	d.currentFlows = make(map[FlowKey]*saver.TCP)
 }
 
 // CapturePackets captures the packets from the channel `packets` and hands them
@@ -115,7 +115,7 @@ func (d *Demuxer) collectGarbage() {
 // This function can be stopped by cancelling the passed-in context or by
 // closing both the passed-in packet channel and the UUIDChan to indicate that
 // no future input is possible.
-func (d *Demuxer) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet, gcTicker <-chan time.Time) {
+func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet, gcTicker <-chan time.Time) {
 	// This is the loop that has to run at high speed. All processing that can
 	// happen outside this loop should happen outside this loop. No function
 	// called from this loop should ever block.
@@ -138,16 +138,16 @@ func (d *Demuxer) CapturePackets(ctx context.Context, packets <-chan gopacket.Pa
 	}
 }
 
-// New creates a Demuxer, which is the system which chooses which channel to
-// send the packets to for subsequent saving to a file.
-func New(anon anonymize.IPAnonymizer, dataDir string, maxFlowDuration time.Duration) *Demuxer {
+// NewTCP creates a demuxer.TCP, which is the system which chooses which channel
+// to send TCP/IP packets for subsequent saving to a file.
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, maxFlowDuration time.Duration) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
-	return &Demuxer{
+	return &TCP{
 		UUIDChan:     uuidc,
 		uuidReadChan: uuidc,
 
-		currentFlows: make(map[FullFlow]*saver.TCP),
-		oldFlows:     make(map[FullFlow]*saver.TCP),
+		currentFlows: make(map[FlowKey]*saver.TCP),
+		oldFlows:     make(map[FlowKey]*saver.TCP),
 
 		anon:        anon,
 		dataDir:     dataDir,
