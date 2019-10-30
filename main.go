@@ -18,7 +18,7 @@ import (
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/packet-headers/demuxer"
-	"github.com/m-lab/packet-headers/tcpeventhandler"
+	"github.com/m-lab/packet-headers/tcpinfohandler"
 	"github.com/m-lab/tcp-info/eventsocket"
 )
 
@@ -50,10 +50,10 @@ func main() {
 	cleanupWG := sync.WaitGroup{}
 
 	// Get ready to save the incoming packets to files.
-	dm := demuxer.New(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *captureDuration)
+	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *captureDuration)
 
 	// Inform the demuxer of new UUIDs
-	h := tcpeventhandler.New(mainCtx, dm.UUIDChan)
+	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)
 	cleanupWG.Add(1)
 	go func() {
 		eventsocket.MustRun(mainCtx, *eventSocket, h)
@@ -80,7 +80,7 @@ func main() {
 	defer flowTimeoutTicker.Stop()
 
 	// Capture packets forever, or until mainCtx is cancelled.
-	dm.CapturePackets(mainCtx, packetSource.Packets(), flowTimeoutTicker.C)
+	tcpdm.CapturePackets(mainCtx, packetSource.Packets(), flowTimeoutTicker.C)
 
 	// Wait until all cleanup routines have terminated.
 	cleanupWG.Wait()

@@ -1,5 +1,5 @@
-// Package tcpeventhandler deals with the output from the eventsocket served by the tcp-info binary.
-package tcpeventhandler
+// Package tcpinfohandler deals with the output from the eventsocket served by the tcp-info binary.
+package tcpinfohandler
 
 import (
 	"context"

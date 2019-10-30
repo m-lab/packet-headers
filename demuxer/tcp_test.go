@@ -32,34 +32,34 @@ func (f *fakePacketSource) run() {
 	}
 }
 
-func TestDemuxerDryRun(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestDemuxerDryRun")
+func TestTCPDryRun(t *testing.T) {
+	dir, err := ioutil.TempDir("", "TestTCPDryRun")
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	d := New(anonymize.New(anonymize.None), dir, time.Second)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, time.Second)
 
 	// While we have a demuxer created, make sure that the processing path for
 	// packets does not crash when given a nil packet.
-	d.savePacket(context.Background(), nil) // No crash == success
+	tcpdm.savePacket(context.Background(), nil) // No crash == success
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
 	cancel()
 
 	pChan := make(chan gopacket.Packet)
 	gcTimer := make(chan time.Time)
-	d.CapturePackets(ctx, pChan, gcTimer)
+	tcpdm.CapturePackets(ctx, pChan, gcTimer)
 	close(gcTimer)
 	close(pChan)
 	// Does not run forever or crash == success
 }
 
-func TestDemuxerWithRealPcaps(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestDemuxerWithRealPcaps")
+func TestTCPWithRealPcaps(t *testing.T) {
+	dir, err := ioutil.TempDir("", "TestTCPWithRealPcaps")
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	d := New(anonymize.New(anonymize.None), dir, time.Second)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -70,7 +70,7 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 	gc := make(chan time.Time)
 	// Run the demuxer and send it events.
 	go func() {
-		d.CapturePackets(ctx, pChan, gc)
+		tcpdm.CapturePackets(ctx, pChan, gc)
 		wg.Done()
 	}()
 
@@ -116,7 +116,7 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 	// 4 is tested by (b,d,f)
 	// 5 is tested by (a,b,c,d,e,f,g)
 
-	d.UUIDChan <- UUIDEvent{
+	tcpdm.UUIDChan <- UUIDEvent{
 		UUIDEvent: saver.UUIDEvent{
 			UUID:      "flow1",
 			Timestamp: time.Date(2013, time.October, 31, 1, 2, 3, 4, time.UTC),
@@ -130,7 +130,7 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 		pChan <- p
 	}
 
-	d.UUIDChan <- UUIDEvent{
+	tcpdm.UUIDChan <- UUIDEvent{
 		UUIDEvent: saver.UUIDEvent{
 			UUID:      "flow2",
 			Timestamp: time.Date(2013, time.October, 30, 1, 2, 3, 4, time.UTC),
@@ -162,8 +162,8 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 	// Lose all race conditions again.
 	time.Sleep(100 * time.Millisecond)
 	// Verify that one flow was garbage collected.
-	if len(d.oldFlows) != 1 || len(d.currentFlows) != 0 {
-		t.Errorf("Should have 1 old flow, not %d and 0 currentFlows not %d", len(d.oldFlows), len(d.currentFlows))
+	if len(tcpdm.oldFlows) != 1 || len(tcpdm.currentFlows) != 0 {
+		t.Errorf("Should have 1 old flow, not %d and 0 currentFlows not %d", len(tcpdm.oldFlows), len(tcpdm.currentFlows))
 	}
 	gc <- time.Now()
 	time.Sleep(100 * time.Millisecond)
@@ -195,13 +195,13 @@ func TestDemuxerWithRealPcaps(t *testing.T) {
 
 	// After all that, also check that writes to an out-of-capacity Pchan will
 	// not block.
-	s := d.getSaver(ctx, flow1)
+	s := tcpdm.getSaver(ctx, flow1)
 	close(s.Pchan)
 	close(s.UUIDchan)
 	// This new channel assigned to s.Pchan will never be read, so if a blocking
 	// write is performed then this goroutine will block.
 	s.Pchan = make(chan gopacket.Packet)
-	d.savePacket(ctx, flow1packets[0])
+	tcpdm.savePacket(ctx, flow1packets[0])
 	// If this doesn't block, then success!
 }
 
@@ -222,7 +222,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	d := New(anonymize.New(anonymize.None), dir, 30*time.Second)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 30*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 	var wg sync.WaitGroup
@@ -230,7 +230,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	go func() {
 		pChan := make(chan gopacket.Packet)
 		gcTimer := make(chan time.Time)
-		d.CapturePackets(ctx, pChan, gcTimer)
+		tcpdm.CapturePackets(ctx, pChan, gcTimer)
 		// Does not run forever or crash == success
 		wg.Done()
 	}()
@@ -238,7 +238,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	// Write to the UUID channel 1000 times (more than exhausting its buffer)
 	for i := 0; i < 1000; i++ {
 		log.Println(i)
-		d.UUIDChan <- e
+		tcpdm.UUIDChan <- e
 	}
 	// Lose all channel-read race conditions.
 	time.Sleep(100 * time.Millisecond)
