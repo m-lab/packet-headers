@@ -1,3 +1,4 @@
+// Package metrics is the central storage lcoation for all program metrics.
 package metrics
 
 import (
@@ -75,6 +76,14 @@ var (
 			Name: "pcap_demuxer_uuids_total",
 			Help: "How many UUIDs has the demuxer been told about. Should match pcap_saver_starts_total very closely",
 		},
+	)
+
+	BadEventsFromTCPInfo = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "pcap_tcpeventhandler_bad_events_total",
+			Help: "How many unparseable events have been sent from tcp-info. This should always be zero.",
+		},
+		[]string{"reason"},
 	)
 
 // TODO(https://github.com/m-lab/packet-headers/issues/5) Create some histograms for SLIs

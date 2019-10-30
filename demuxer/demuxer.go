@@ -1,3 +1,4 @@
+// Package demuxer contains the tools for sending packets to the right goroutine to save them to disk.
 package demuxer
 
 import (
@@ -5,43 +6,11 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/packet-headers/metrics"
 	"github.com/m-lab/packet-headers/saver"
 	"github.com/prometheus/client_golang/prometheus"
 )
-
-// FullFlow characterizes a TCP/IP flow without judgement about what direction
-// the flow is. The lexicographically lowest IP/Port combination should always
-// be first. It is not meant to be human-readable, and is instead only designed
-// to be used as a key in a map.
-type FullFlow struct {
-	lo, hi   string
-	loP, hiP uint16
-}
-
-// fromPacket converts a packet's TCP 4-tuple into a FullFlow suitable for being
-// a map key. Never pass fromPacket a non-TCP/IP packet - it will crash.
-func fromPacket(p gopacket.Packet) FullFlow {
-	nl := p.NetworkLayer()
-	var ip1, ip2 string
-	switch nl.LayerType() {
-	case layers.LayerTypeIPv4:
-		ip1 = string(nl.(*layers.IPv4).SrcIP)
-		ip2 = string(nl.(*layers.IPv4).DstIP)
-	case layers.LayerTypeIPv6:
-		ip1 = string(nl.(*layers.IPv6).SrcIP)
-		ip2 = string(nl.(*layers.IPv6).DstIP)
-	}
-	f := p.TransportLayer().(*layers.TCP)
-	ip1P := uint16(f.SrcPort)
-	ip2P := uint16(f.DstPort)
-	if ip1 < ip2 || (ip1 == ip2 && ip1P < ip2P) {
-		return FullFlow{ip1, ip2, ip1P, ip2P}
-	}
-	return FullFlow{ip2, ip1, ip2P, ip1P}
-}
 
 // UUIDEvent is the datatype sent to a demuxer's UUIDChan to notify it about the
 // UUID of new flows.
