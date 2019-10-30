@@ -50,4 +50,7 @@ func TestHandlerOpen(t *testing.T) {
 	if e.UUID != uuid {
 		t.Error("Unequal uuids", e.UUID, uuid)
 	}
+
+	// Make sure that Close won't crash. It should do nothing.
+	h.Close(timestamp, uuid) // no crash == success
 }
