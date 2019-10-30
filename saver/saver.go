@@ -1,3 +1,4 @@
+// Package saver provides the toold for saving a single flow's packets to disk.
 package saver
 
 import (
