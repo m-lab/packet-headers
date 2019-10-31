@@ -12,10 +12,13 @@ import (
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/m-lab/go/rtx"
+	"github.com/m-lab/packet-headers/metrics"
 )
 
 func forwardPackets(ctx context.Context, in <-chan gopacket.Packet, out chan<- gopacket.Packet, wg *sync.WaitGroup) {
 	defer wg.Done()
+	metrics.InterfacesBeingCaptured.Inc()
+	defer metrics.InterfacesBeingCaptured.Dec()
 
 	for {
 		select {

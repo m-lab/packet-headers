@@ -49,7 +49,7 @@ func main() {
 
 	// Special case for argument "-interface": if no interface was specified,
 	// then all of them were implicitly specified. If new interfaces are created
-	// after capture is started, traffic on those interfaqces will be ignored.
+	// after capture is started, traffic on those interfaces will be ignored.
 	if len(interfaces) == 0 {
 		ifaces, err := net.Interfaces()
 		rtx.Must(err, "Could not list interfaces")
@@ -79,7 +79,7 @@ func main() {
 		cleanupWG.Done()
 	}()
 
-	// A channel with a buffer to prevent tight coupling of captures.
+	// A channel with a buffer to prevent tight coupling of captures with the demuxer.TCP goroutine's read loop.
 	packets := make(chan gopacket.Packet, 1000)
 
 	// Capture packets on every interface.

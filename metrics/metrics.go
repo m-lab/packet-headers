@@ -86,5 +86,12 @@ var (
 		[]string{"reason"},
 	)
 
+	InterfacesBeingCaptured = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "pcap_muxer_interfaces_with_captures",
+			Help: "How many interfaces currently have a packet capture running on them, according to the muxer.",
+		},
+	)
+
 // TODO(https://github.com/m-lab/packet-headers/issues/5) Create some histograms for SLIs
 )
