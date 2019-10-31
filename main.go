@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"flag"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -10,7 +11,6 @@ import (
 	"github.com/m-lab/go/anonymize"
 
 	"github.com/google/gopacket"
-	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 
 	"github.com/m-lab/go/flagx"
@@ -18,6 +18,7 @@ import (
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/packet-headers/demuxer"
+	"github.com/m-lab/packet-headers/muxer"
 	"github.com/m-lab/packet-headers/tcpinfohandler"
 	"github.com/m-lab/tcp-info/eventsocket"
 )
@@ -28,26 +29,44 @@ var (
 	captureDuration = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
 	flowTimeout     = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
 	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
-	netInterface    = flag.String("interface", "eth0", "The interface on which to capture packets.")
+
+	interfaces flagx.StringArray
 
 	// Context and injected variables to allow smoke testing of main()
 	mainCtx, mainCancel = context.WithCancel(context.Background())
 	pcapOpenLive        = pcap.OpenLive
 )
 
+func init() {
+	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
+}
+
 func main() {
+	defer mainCancel()
+
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
 
-	defer mainCancel()
+	// Special case for argument "-interface": if no interface was specified,
+	// then all of them were implicitly specified. If new interfaces are created
+	// after capture is started, traffic on those interfaces will be ignored.
+	if len(interfaces) == 0 {
+		ifaces, err := net.Interfaces()
+		rtx.Must(err, "Could not list interfaces")
+		for _, iface := range ifaces {
+			interfaces = append(interfaces, iface.Name)
+		}
+	}
+
 	psrv := prometheusx.MustServeMetrics()
 	defer warnonerror.Close(psrv, "Could not stop metric server")
 
 	rtx.Must(os.Chdir(*dir), "Could not cd to directory %q", *dir)
 
-	// A waitgroup to make sure main() doesn't exit before all its components
+	// A waitgroup to make sure main() doesn't return before all its components
 	// get cleaned up.
 	cleanupWG := sync.WaitGroup{}
+	defer cleanupWG.Wait()
 
 	// Get ready to save the incoming packets to files.
 	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *captureDuration)
@@ -60,28 +79,20 @@ func main() {
 		cleanupWG.Done()
 	}()
 
-	// Open a packet capture
-	handle, err := pcapOpenLive(*netInterface, int32(*maxHeaderSize), true, pcap.BlockForever)
-	rtx.Must(err, "Could not create libpcap client")
-	rtx.Must(handle.SetBPFFilter("tcp"), "Could not set up BPF filter for TCP")
-	// Stop packet capture when the context is canceled.
+	// A channel with a buffer to prevent tight coupling of captures with the demuxer.TCP goroutine's read loop.
+	packets := make(chan gopacket.Packet, 1000)
+
+	// Capture packets on every interface.
 	cleanupWG.Add(1)
 	go func() {
-		<-mainCtx.Done()
-		handle.Close()
+		muxer.MustCaptureTCPOnInterfaces(mainCtx, interfaces, packets, pcapOpenLive, int32(*maxHeaderSize))
 		cleanupWG.Done()
 	}()
-
-	// Set up the packet capture.
-	packetSource := gopacket.NewPacketSource(handle, layers.LinkTypeEthernet)
 
 	// Set up the timer for flow timeouts.
 	flowTimeoutTicker := time.NewTicker(*flowTimeout)
 	defer flowTimeoutTicker.Stop()
 
 	// Capture packets forever, or until mainCtx is cancelled.
-	tcpdm.CapturePackets(mainCtx, packetSource.Packets(), flowTimeoutTicker.C)
-
-	// Wait until all cleanup routines have terminated.
-	cleanupWG.Wait()
+	tcpdm.CapturePackets(mainCtx, packets, flowTimeoutTicker.C)
 }
