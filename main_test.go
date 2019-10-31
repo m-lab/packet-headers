@@ -4,6 +4,7 @@ import (
 	"context"
 	"io/ioutil"
 	"os"
+	"syscall"
 	"testing"
 	"time"
 
@@ -19,6 +20,9 @@ func fakePcapOpenLive(device string, snaplen int32, promisc bool, timeout time.D
 }
 
 func TestMainSmokeTest(t *testing.T) {
+	mainCtx, mainCancel = context.WithCancel(context.Background())
+	*prometheusx.ListenAddress = ":0"
+
 	dir, err := ioutil.TempDir("", "TestMainSmokeTest")
 	rtx.Must(err, "Could not create temp dir")
 	defer os.RemoveAll(dir)
@@ -50,4 +54,23 @@ func TestMainSmokeTest(t *testing.T) {
 	*prometheusx.ListenAddress = ":0"
 	main()
 	// No crash and successful termination == success
+}
+
+func TestSigtermHandlerOnCancel(t *testing.T) {
+	mainCtx, mainCancel = context.WithCancel(context.Background())
+	mainCancel()
+	catch(syscall.SIGUSR1)
+	// No freeze == success
+}
+
+func TestSigtermHandlerOnSignal(t *testing.T) {
+	// Test signal handling with the "window size change" signal.
+	mainCtx, mainCancel = context.WithCancel(context.Background())
+	defer mainCancel()
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		syscall.Kill(syscall.Getpid(), syscall.SIGWINCH)
+	}()
+	catch(syscall.SIGWINCH)
+	<-mainCtx.Done()
 }
