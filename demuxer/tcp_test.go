@@ -138,15 +138,6 @@ func TestTCPWithRealPcaps(t *testing.T) {
 		Flow: flow2,
 	}
 
-	// Busy-wait until both files appear on disk.
-	var err1, err2 error
-	err1 = errors.New("start out with an error")
-	for err1 != nil || err2 != nil {
-		_, err1 = os.Stat(dir + "/2013/10/31/flow1.pcap")
-		_, err2 = os.Stat(dir + "/2013/10/30/flow2.pcap")
-		log.Println(err1, err2)
-	}
-
 	// Lose all race conditions, then fire the GC to
 	// cause the flows to become oldFlows.
 	time.Sleep(100 * time.Millisecond)
@@ -169,6 +160,15 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 	cancel()
 	wg.Wait()
+
+	// Busy-wait until both files appear on disk.
+	var err1, err2 error
+	err1 = errors.New("start out with an error")
+	for err1 != nil || err2 != nil {
+		_, err1 = os.Stat(dir + "/2013/10/31/flow1.pcap")
+		_, err2 = os.Stat(dir + "/2013/10/30/flow2.pcap")
+		time.Sleep(100 * time.Millisecond)
+	}
 
 	// Verify the files' contents.
 	handle, err = pcap.OpenOffline(dir + "/2013/10/31/flow1.pcap")

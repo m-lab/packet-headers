@@ -2,7 +2,9 @@
 package saver
 
 import (
+	"bytes"
 	"context"
+	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -141,7 +143,7 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	}
 
 	// Create a file and directory based on the UUID and the time.
-	t.state.Set("filecreation")
+	t.state.Set("dircreation")
 	dir, fname := filename(t.dir, uuidEvent)
 	err := os.MkdirAll(dir, 0777)
 	if err != nil {
@@ -149,15 +151,10 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 		t.error("mkdir")
 		return
 	}
-	f, err := os.Create(path.Join(dir, fname))
-	if err != nil {
-		t.error("create")
-		return
-	}
-	defer f.Close()
+	buff := &bytes.Buffer{}
 
 	// Write PCAP data to the new file.
-	w := pcapgo.NewWriterNanos(f)
+	w := pcapgo.NewWriterNanos(buff)
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingpackets")
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
@@ -190,12 +187,18 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 		}
 		t.savePacket(w, p, headerLen)
 	}
-	f.Close()
+
+	t.state.Set("savingfile")
+	err = ioutil.WriteFile(path.Join(dir, fname), buff.Bytes(), 0664)
+	if err != nil {
+		t.error("filewrite")
+	}
+
 	t.state.Set("discardingpackets")
 	// Now read until the channel is closed or the passed-in context is cancelled.
 	keepDiscarding := true
 	for keepDiscarding {
-		_, keepDiscarding = t.readPacket(derivedCtx)
+		_, keepDiscarding = t.readPacket(ctx)
 	}
 }
 

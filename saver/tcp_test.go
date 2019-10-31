@@ -101,7 +101,7 @@ func TestSaverDryRun(t *testing.T) {
 	s.start(ctx, 10*time.Second) // Give the disk IO 10 seconds to happen.
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "filecreation", "readingpackets", "nopacketserror"},
+		past:   []string{"notstarted", "uuidwait", "dircreation", "readingpackets", "nopacketserror"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -173,7 +173,7 @@ func TestSaverCantMkdir(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "filecreation", "mkdirerror"},
+		past:   []string{"notstarted", "uuidwait", "dircreation", "mkdirerror"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -192,14 +192,25 @@ func TestSaverCantCreate(t *testing.T) {
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
+	// Get the packet data ready to send.
+	h, err := pcap.OpenOffline("../testdata/v4.pcap")
+	rtx.Must(err, "Could not open v4.pcap")
+	ps := gopacket.NewPacketSource(h, h.LinkType())
+
 	// A UUID containing a non-shell-safe character will never happen in
 	// practice, but it does cause the resulting file to fail in os.Create()
 	s.UUIDchan <- UUIDEvent{"test/UUID", time.Now()}
-	s.start(context.Background(), 10*time.Second)
+	for p := range ps.Packets() {
+		s.Pchan <- p
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+	s.start(ctx, 100*time.Millisecond)
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "filecreation", "createerror"},
+		past:   []string{"notstarted", "uuidwait", "dircreation", "readingpackets", "savingfile", "filewriteerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
