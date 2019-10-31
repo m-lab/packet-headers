@@ -32,6 +32,7 @@ var (
 	captureDuration = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
 	flowTimeout     = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
 	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
+	sigtermWaitTime = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 
 	interfaces flagx.StringArray
 
@@ -53,8 +54,8 @@ func catch(sig os.Signal) {
 	select {
 	case <-c:
 		fmt.Println("Received", sig)
+		time.Sleep(*sigtermWaitTime)
 		mainCancel()
-		time.Sleep(1 * time.Second)
 	case <-mainCtx.Done():
 		fmt.Println("Canceled")
 	}
