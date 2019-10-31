@@ -48,7 +48,8 @@ func main() {
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
 
 	// Special case for argument "-interface": if no interface was specified,
-	// then all of them were implicitly specified.
+	// then all of them were implicitly specified. If new interfaces are created
+	// after capture is started, traffic on those interfaqces will be ignored.
 	if len(interfaces) == 0 {
 		ifaces, err := net.Interfaces()
 		rtx.Must(err, "Could not list interfaces")
