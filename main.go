@@ -42,6 +42,8 @@ func init() {
 }
 
 func main() {
+	defer mainCancel()
+
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
 
@@ -55,7 +57,6 @@ func main() {
 		}
 	}
 
-	defer mainCancel()
 	psrv := prometheusx.MustServeMetrics()
 	defer warnonerror.Close(psrv, "Could not stop metric server")
 
