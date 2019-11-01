@@ -3,9 +3,12 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/m-lab/go/anonymize"
@@ -29,6 +32,7 @@ var (
 	captureDuration = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
 	flowTimeout     = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
 	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
+	sigtermWaitTime = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 
 	interfaces flagx.StringArray
 
@@ -41,15 +45,34 @@ func init() {
 	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
 }
 
+func catch(sig os.Signal) {
+	c := make(chan os.Signal, 1)
+	defer close(c)
+	signal.Notify(c, sig)
+
+	// Wait until we receive a signal or the context is canceled.
+	select {
+	case <-c:
+		fmt.Println("Received", sig)
+		time.Sleep(*sigtermWaitTime)
+		mainCancel()
+	case <-mainCtx.Done():
+		fmt.Println("Canceled")
+	}
+}
+
 func main() {
 	defer mainCancel()
 
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
 
-	// Special case for argument "-interface": if no interface was specified,
-	// then all of them were implicitly specified. If new interfaces are created
-	// after capture is started, traffic on those interfaces will be ignored.
+	// Special case for argument "-interface": if no specific interface was
+	// specified, then "all of them" was implicitly specified. If new interfaces
+	// are created after capture is started, traffic on those interfaces will be
+	// ignored. If interfaces disappear, the effects are unknown. The number of
+	// interfaces with a running capture is tracked in the
+	// pcap_muxer_interfaces_with_captures metric.
 	if len(interfaces) == 0 {
 		ifaces, err := net.Interfaces()
 		rtx.Must(err, "Could not list interfaces")
@@ -67,6 +90,12 @@ func main() {
 	// get cleaned up.
 	cleanupWG := sync.WaitGroup{}
 	defer cleanupWG.Wait()
+
+	cleanupWG.Add(1)
+	go func() {
+		catch(syscall.SIGTERM)
+		cleanupWG.Done()
+	}()
 
 	// Get ready to save the incoming packets to files.
 	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *captureDuration)
