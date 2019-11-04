@@ -274,6 +274,9 @@ func TestSaverWithRealv4Data(t *testing.T) {
 				}
 			}
 		}
+		// We have packets going both directions, so the srcIP and dstIP will
+		// swap roles over the course of the packet capture, as will the src and
+		// dst ports.
 		srcIP := p.NetworkLayer().(*layers.IPv4).SrcIP.To4()
 		if !reflect.DeepEqual(srcIP, net.ParseIP("172.17.0.0").To4()) && !reflect.DeepEqual(srcIP, net.ParseIP("91.189.88.0").To4()) {
 			t.Error("IPv4 src addr was not anonymized:", srcIP)
