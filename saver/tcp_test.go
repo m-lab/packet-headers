@@ -257,48 +257,40 @@ func TestSaverWithRealv4Data(t *testing.T) {
 	ps := gopacket.NewPacketSource(handle, handle.LinkType())
 	var packets []gopacket.Packet
 	for p := range ps.Packets() {
-		// Verify that each packet has had its payload zeroed out.
 		packets = append(packets, p)
-		// Verify that each packet has had its payload zeroed out.
-		pl := p.NetworkLayer().LayerPayload()
-		for _, b := range pl {
-			if b != 0 {
-				t.Error("The payload of the packet", p, "was supposed to be zeroed out")
-			}
-		}
 	}
+
 	if len(packets) != 12 {
 		t.Error("Bad length (should be 12):", len(packets))
 	}
 	for _, p := range packets {
 		al := p.ApplicationLayer()
-		if al == nil {
-			continue
-		}
-		data := al.LayerContents()
-		for _, b := range data {
-			if b != 0 {
-				t.Error("All application layer data is supposed to be zeroed, but was not in", p)
-				break
+		if al != nil {
+			data := al.LayerContents()
+			for _, b := range data {
+				if b != 0 {
+					t.Error("All application layer data is supposed to be zeroed, but was not in", p)
+					break
+				}
 			}
 		}
+		// We have packets going both directions, so the srcIP and dstIP will
+		// swap roles over the course of the packet capture, as will the src and
+		// dst ports.
 		srcIP := p.NetworkLayer().(*layers.IPv4).SrcIP.To4()
-		if srcIP[3] == 0 {
-			t.Error("Last byte of v4 addr should be zero")
-		}
-		for b := range srcIP[:3] {
-			if b == 0 {
-				t.Error("No low-end v4 address bytes should be zeroed out")
-			}
+		if !reflect.DeepEqual(srcIP, net.ParseIP("172.17.0.0").To4()) && !reflect.DeepEqual(srcIP, net.ParseIP("91.189.88.0").To4()) {
+			t.Error("IPv4 src addr was not anonymized:", srcIP)
 		}
 		dstIP := p.NetworkLayer().(*layers.IPv4).DstIP.To4()
-		if dstIP[3] == 0 {
-			t.Error("Last byte of v4 addr should be zero")
+		if !reflect.DeepEqual(dstIP, net.ParseIP("172.17.0.0").To4()) && !reflect.DeepEqual(dstIP, net.ParseIP("91.189.88.0").To4()) {
+			t.Error("IPv4 dst addr was not anonymized:", dstIP)
 		}
-		for b := range dstIP[:3] {
-			if b != 0 {
-				t.Error("No low-end v4 address bytes should be zeroed out")
-			}
+		port1, port2 := p.TransportLayer().TransportFlow().Endpoints()
+		if port1.String() != "49834" && port1.String() != "80" {
+			t.Error("Bad port1 snuck in")
+		}
+		if port2.String() != "49834" && port2.String() != "80" {
+			t.Error("Bad port2 snuck in")
 		}
 	}
 }
@@ -341,46 +333,42 @@ func TestSaverWithRealv6Data(t *testing.T) {
 	var packets []gopacket.Packet
 	for p := range ps.Packets() {
 		packets = append(packets, p)
-		// Verify that each packet has had its payload zeroed out.
-		pl := p.NetworkLayer().LayerPayload()
-		for _, b := range pl {
-			if b != 0 {
-				t.Error("The payload of the packet", p, "was supposed to be zeroed out")
-			}
-		}
 	}
+
 	if len(packets) != 8 {
 		t.Error("Bad length (should be 8):", len(packets))
 	}
 	for _, p := range packets {
 		al := p.ApplicationLayer()
-		if al == nil {
-			continue
-		}
-		data := al.LayerContents()
-		for _, b := range data {
-			if b != 0 {
-				t.Error("All application layer data is supposed to be zeroed, but was not in", p)
-				break
+		if al != nil {
+			data := al.LayerContents()
+			for _, b := range data {
+				if b != 0 {
+					t.Error("All application layer data is supposed to be zeroed, but was not in", p)
+					break
+				}
 			}
 		}
 		srcIP := p.NetworkLayer().(*layers.IPv6).SrcIP
 		if srcIP[0] == 0 {
 			t.Error("First byte of v6 addr should not be zero")
 		}
-		for b := range srcIP[15:] {
+		for _, b := range srcIP[8:] {
 			if b != 0 {
-				t.Error("All high-end v6 address bytes should be zeroed out")
+				t.Error("All high-end v6 address bytes should be zeroed out in", p)
 			}
 		}
-		dstIP := p.NetworkLayer().(*layers.IPv4).DstIP
+		dstIP := p.NetworkLayer().(*layers.IPv6).DstIP
 		if dstIP[0] == 0 {
 			t.Error("First byte of v6 addr should not be zero")
 		}
-		for b := range dstIP[15:] {
+		for _, b := range dstIP[8:] {
 			if b != 0 {
-				t.Error("All high-end v6 address bytes should be zeroed out")
+				t.Error("All high-end v6 address bytes should be zeroed out in", p)
 			}
 		}
+
+		// If this doesn't crash, then the transport layer is not nil - success!
+		p.TransportLayer().TransportFlow().Endpoints()
 	}
 }

@@ -46,6 +46,13 @@ func anonymizePacket(a anonymize.IPAnonymizer, p gopacket.Packet) {
 		a.IP(nl.(*layers.IPv6).SrcIP)
 		a.IP(nl.(*layers.IPv6).DstIP)
 	}
+	// If any application layer bytes were set, zero them out.
+	if p.ApplicationLayer() != nil {
+		c := p.ApplicationLayer().LayerContents()
+		for i := 0; i < len(c); i++ {
+			c[i] = 0
+		}
+	}
 }
 
 // UUIDEvent is passed to the saver along with an event arrival timestamp so
@@ -172,10 +179,9 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	//
 	// This algorithm assumes that IPv6 header lengths are stable for a given
 	// flow.
-	nl := p.NetworkLayer()
-	if nl != nil {
-		nlPayloadSize := len(nl.LayerPayload())
-		headerLen -= nlPayloadSize
+	tl := p.TransportLayer()
+	if tl != nil {
+		headerLen -= len(tl.LayerPayload())
 	}
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
