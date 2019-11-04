@@ -181,9 +181,7 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	// flow.
 	tl := p.TransportLayer()
 	if tl != nil {
-		tlPayloadSize := len(tl.LayerPayload())
-		log.Println("Headerlen, tlPaylod size, new headerlen:", headerLen, tlPayloadSize, headerLen-tlPayloadSize)
-		headerLen -= tlPayloadSize
+		headerLen -= len(tl.LayerPayload())
 	}
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
