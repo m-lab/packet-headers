@@ -157,9 +157,11 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	// flow.
 	tl := p.TransportLayer()
 	if tl != nil {
-		// "LayerContents" == the header (I don't know why it's not "LayerHeader")
-		// "LayerPayload" == everything contained within this layer that is not
-		// the header (including all bytes for all subsequent layers)
+		// "LayerContents" == the TCP header
+		//                    (I don't know why it's not "LayerHeader")
+		// "LayerPayload" == everything contained within the transport (TCP)
+		// layer that is not the header (including all bytes for all subsequent
+		// layers)
 		//
 		// So, the data we want to save is: the complete packet before the TCP
 		// layer, plus the maximum size of a TCP header. We calculate this size
