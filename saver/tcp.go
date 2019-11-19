@@ -146,16 +146,18 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	}
 	headerLen := len(p.Data())
 	// Now we try to discover the correct header length for the flow by
-	// discovering the size of the application layer and then subtracting it
-	// from the overall size of the packet data. IPv6 supports variable-length
-	// headers (unlike IPv4, where the length of the IPv4 header is
-	// well-defined), so this is actually required.
+	// discovering the size of everything before the transport layer, then
+	// adding that size and 60 bytes for the TCP header
+	// (https://en.wikipedia.org/wiki/Transmission_Control_Protocol#TCP_segment_structure).
+	// IPv6 supports variable-length headers (unlike IPv4, where the length of
+	// the IPv4 header is well-defined), so this is actually required as opposed
+	// to just choosing the right value as a commandline parameter.
 	//
 	// This algorithm assumes that IPv6 header lengths are stable for a given
 	// flow.
 	tl := p.TransportLayer()
 	if tl != nil {
-		headerLen -= len(tl.LayerPayload())
+		headerLen = headerLen - len(tl.LayerContents()) - len(tl.LayerPayload()) + 60
 	}
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
