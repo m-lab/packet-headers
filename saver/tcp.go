@@ -132,35 +132,9 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
-	// First read the UUID
-	t.state.Set("uuidwait")
-	var uuidEvent UUIDEvent
-	var ok bool
-	select {
-	case uuidEvent, ok = <-t.uuidchanRead:
-		if !ok {
-			log.Println("UUID channel closed, PCAP capture cancelled with no UUID")
-			t.error("uuidchan")
-			return
-		}
-	case <-ctx.Done():
-		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
-		t.error("uuid")
-		return
-	}
-
-	// Create a file and directory based on the UUID and the time.
-	t.state.Set("dircreation")
-	dir, fname := filename(t.dir, uuidEvent)
-	err := os.MkdirAll(dir, 0777)
-	if err != nil {
-		log.Println("Could not create directory", dir, err)
-		t.error("mkdir")
-		return
-	}
 	buff := &bytes.Buffer{}
 
-	// Write PCAP data to the new file.
+	// Write PCAP data to the buffer.
 	w := pcapgo.NewWriterNanos(buff)
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingpackets")
@@ -192,6 +166,33 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 			break
 		}
 		t.savePacket(w, p, headerLen)
+	}
+
+	// Read the UUID to determine the filename
+	t.state.Set("uuidwait")
+	var uuidEvent UUIDEvent
+	select {
+	case uuidEvent, ok = <-t.uuidchanRead:
+		if !ok {
+			log.Println("UUID channel closed, PCAP capture cancelled with no UUID")
+			t.error("uuidchan")
+			return
+		}
+	case <-ctx.Done():
+		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
+		t.error("uuid")
+		return
+	}
+	// uuidEvent is now set to a good value.
+
+	// Create a file and directory based on the UUID and the time.
+	t.state.Set("dircreation")
+	dir, fname := filename(t.dir, uuidEvent)
+	err := os.MkdirAll(dir, 0777)
+	if err != nil {
+		log.Println("Could not create directory", dir, err)
+		t.error("mkdir")
+		return
 	}
 
 	t.state.Set("savingfile")

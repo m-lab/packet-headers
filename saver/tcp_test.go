@@ -101,7 +101,7 @@ func TestSaverDryRun(t *testing.T) {
 	s.start(ctx, 10*time.Second) // Give the disk IO 10 seconds to happen.
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "dircreation", "readingpackets", "nopacketserror"},
+		past:   []string{"notstarted", "readingpackets", "nopacketserror"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -120,12 +120,19 @@ func TestSaverNoUUID(t *testing.T) {
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
+	h, err := pcap.OpenOffline("../testdata/v4.pcap")
+	rtx.Must(err, "Could not open v4.pcap")
+	ps := gopacket.NewPacketSource(h, h.LinkType())
+	for p := range ps.Packets() {
+		s.Pchan <- p
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 	s.start(ctx, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "uuiderror"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuiderror"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -144,11 +151,19 @@ func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
+	h, err := pcap.OpenOffline("../testdata/v4.pcap")
+	rtx.Must(err, "Could not open v4.pcap")
+	ps := gopacket.NewPacketSource(h, h.LinkType())
+	for p := range ps.Packets() {
+		s.Pchan <- p
+	}
+	close(s.Pchan)
 	close(s.UUIDchan)
+
 	s.start(context.Background(), 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "uuidchanerror"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuidchanerror"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -169,11 +184,20 @@ func TestSaverCantMkdir(t *testing.T) {
 	s.state = &tracker
 
 	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
+
+	h, err := pcap.OpenOffline("../testdata/v4.pcap")
+	rtx.Must(err, "Could not open v4.pcap")
+	ps := gopacket.NewPacketSource(h, h.LinkType())
+	for p := range ps.Packets() {
+		s.Pchan <- p
+	}
+	close(s.Pchan)
+
 	s.start(context.Background(), 10*time.Second)
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "dircreation", "mkdirerror"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "dircreation", "mkdirerror"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -203,6 +227,7 @@ func TestSaverCantCreate(t *testing.T) {
 	for p := range ps.Packets() {
 		s.Pchan <- p
 	}
+	close(s.Pchan)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
@@ -210,7 +235,7 @@ func TestSaverCantCreate(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "uuidwait", "dircreation", "readingpackets", "savingfile", "filewriteerror", "discardingpackets"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "dircreation", "savingfile", "filewriteerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
