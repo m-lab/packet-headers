@@ -132,35 +132,9 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
-	// First read the UUID
-	t.state.Set("uuidwait")
-	var uuidEvent UUIDEvent
-	var ok bool
-	select {
-	case uuidEvent, ok = <-t.uuidchanRead:
-		if !ok {
-			log.Println("UUID channel closed, PCAP capture cancelled with no UUID")
-			t.error("uuidchan")
-			return
-		}
-	case <-ctx.Done():
-		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
-		t.error("uuid")
-		return
-	}
-
-	// Create a file and directory based on the UUID and the time.
-	t.state.Set("dircreation")
-	dir, fname := filename(t.dir, uuidEvent)
-	err := os.MkdirAll(dir, 0777)
-	if err != nil {
-		log.Println("Could not create directory", dir, err)
-		t.error("mkdir")
-		return
-	}
 	buff := &bytes.Buffer{}
 
-	// Write PCAP data to the new file.
+	// Write PCAP data to the buffer.
 	w := pcapgo.NewWriterNanos(buff)
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingpackets")
@@ -172,16 +146,28 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	}
 	headerLen := len(p.Data())
 	// Now we try to discover the correct header length for the flow by
-	// discovering the size of the application layer and then subtracting it
-	// from the overall size of the packet data. IPv6 supports variable-length
-	// headers (unlike IPv4, where the length of the IPv4 header is
-	// well-defined), so this is actually required.
+	// discovering the size of everything before the transport layer, then
+	// adding that size and 60 bytes for the TCP header
+	// (https://en.wikipedia.org/wiki/Transmission_Control_Protocol#TCP_segment_structure).
+	// IPv6 supports variable-length headers (unlike IPv4, where the length of
+	// the IPv4 header is well-defined), so this is actually required as opposed
+	// to just choosing the right value as a commandline parameter.
 	//
 	// This algorithm assumes that IPv6 header lengths are stable for a given
 	// flow.
 	tl := p.TransportLayer()
 	if tl != nil {
-		headerLen -= len(tl.LayerPayload())
+		// "LayerContents" == the TCP header
+		//                    (I don't know why it's not "LayerHeader")
+		// "LayerPayload" == everything contained within the transport (TCP)
+		// layer that is not the header (including all bytes for all subsequent
+		// layers)
+		//
+		// So, the data we want to save is: the complete packet before the TCP
+		// layer, plus the maximum size of a TCP header. We calculate this size
+		// by subtracting the actual TCP header and payload lengths from the
+		// overall packet size and then adding 60.
+		headerLen = len(p.Data()) - len(tl.LayerContents()) - len(tl.LayerPayload()) + 60
 	}
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
@@ -194,11 +180,40 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 		t.savePacket(w, p, headerLen)
 	}
 
+	// Read the UUID to determine the filename
+	t.state.Set("uuidwait")
+	var uuidEvent UUIDEvent
+	select {
+	case uuidEvent, ok = <-t.uuidchanRead:
+		if !ok {
+			log.Println("UUID channel closed, PCAP capture cancelled with no UUID")
+			t.error("uuidchan")
+			return
+		}
+	case <-ctx.Done():
+		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
+		t.error("uuid")
+		return
+	}
+	// uuidEvent is now set to a good value.
+
+	// Create a file and directory based on the UUID and the time.
+	t.state.Set("dircreation")
+	dir, fname := filename(t.dir, uuidEvent)
+	err := os.MkdirAll(dir, 0777)
+	if err != nil {
+		log.Println("Could not create directory", dir, err)
+		t.error("mkdir")
+		return
+	}
+
 	t.state.Set("savingfile")
-	err = ioutil.WriteFile(path.Join(dir, fname), buff.Bytes(), 0664)
+	fullFilename := path.Join(dir, fname)
+	err = ioutil.WriteFile(fullFilename, buff.Bytes(), 0664)
 	if err != nil {
 		t.error("filewrite")
 	}
+	log.Println("Successfully wrote", fullFilename)
 
 	t.state.Set("discardingpackets")
 	// Now read until the channel is closed or the passed-in context is cancelled.

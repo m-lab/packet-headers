@@ -4,6 +4,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"os/signal"
@@ -74,6 +75,7 @@ func main() {
 	// interfaces with a running capture is tracked in the
 	// pcap_muxer_interfaces_with_captures metric.
 	if len(interfaces) == 0 {
+		log.Println("No interfaces specified, will listen for packets on all available interfaces.")
 		ifaces, err := net.Interfaces()
 		rtx.Must(err, "Could not list interfaces")
 		for _, iface := range ifaces {
@@ -105,6 +107,7 @@ func main() {
 	cleanupWG.Add(1)
 	go func() {
 		eventsocket.MustRun(mainCtx, *eventSocket, h)
+		mainCancel()
 		cleanupWG.Done()
 	}()
 
@@ -115,6 +118,7 @@ func main() {
 	cleanupWG.Add(1)
 	go func() {
 		muxer.MustCaptureTCPOnInterfaces(mainCtx, interfaces, packets, pcapOpenLive, int32(*maxHeaderSize))
+		mainCancel()
 		cleanupWG.Done()
 	}()
 
