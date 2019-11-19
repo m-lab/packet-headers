@@ -195,10 +195,12 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	}
 
 	t.state.Set("savingfile")
-	err = ioutil.WriteFile(path.Join(dir, fname), buff.Bytes(), 0664)
+	fullFilename := path.Join(dir, fname)
+	err = ioutil.WriteFile(fullFilename, buff.Bytes(), 0664)
 	if err != nil {
 		t.error("filewrite")
 	}
+	log.Println("Successfully wrote", fullFilename)
 
 	t.state.Set("discardingpackets")
 	// Now read until the channel is closed or the passed-in context is cancelled.
