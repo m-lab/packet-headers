@@ -101,7 +101,7 @@ func TestSaverDryRun(t *testing.T) {
 	s.start(ctx, 10*time.Second) // Give the disk IO 10 seconds to happen.
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "nopacketserror"},
+		past:   []string{"notstarted", "readingpackets", "nopacketserror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -132,7 +132,7 @@ func TestSaverNoUUID(t *testing.T) {
 	s.start(ctx, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuiderror"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuiderror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -163,7 +163,7 @@ func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
 	s.start(context.Background(), 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuidchanerror"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuidchanerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -197,7 +197,7 @@ func TestSaverCantMkdir(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "dircreation", "mkdirerror"},
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "dircreation", "mkdirerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
