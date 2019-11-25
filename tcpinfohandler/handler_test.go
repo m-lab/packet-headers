@@ -16,8 +16,8 @@ func TestHandlerOpen(t *testing.T) {
 	c := make(chan demuxer.UUIDEvent, 1)
 	h := New(ctx, c)
 
-	h.Open(time.Now(), "nildata", nil)               // No crash == success
-	h.Open(time.Now(), "badips", &inetdiag.SockID{}) // No crash == success
+	h.Open(ctx, time.Now(), "nildata", nil)               // No crash == success
+	h.Open(ctx, time.Now(), "badips", &inetdiag.SockID{}) // No crash == success
 
 	// Channel should be empty after the bad messages.
 	select {
@@ -40,7 +40,7 @@ func TestHandlerOpen(t *testing.T) {
 		DPort: dPort,
 	}
 
-	h.Open(timestamp, uuid, sockid)
+	h.Open(ctx, timestamp, uuid, sockid)
 	// Read the event from the channel
 	e := <-c
 	if e.Timestamp != timestamp {
@@ -51,5 +51,5 @@ func TestHandlerOpen(t *testing.T) {
 	}
 
 	// Make sure that Close won't crash. It should do nothing.
-	h.Close(timestamp, uuid) // no crash == success
+	h.Close(ctx, timestamp, uuid) // no crash == success
 }

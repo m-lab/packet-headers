@@ -27,7 +27,7 @@ type handler struct {
 }
 
 // Open processes an Open message for a new flow, sending its UUID to the demuxer.
-func (h *handler) Open(timestamp time.Time, uuid string, id *inetdiag.SockID) {
+func (h *handler) Open(ctx context.Context, timestamp time.Time, uuid string, id *inetdiag.SockID) {
 	if id == nil {
 		metrics.BadEventsFromTCPInfo.WithLabelValues("nilid").Inc()
 		return
@@ -48,7 +48,7 @@ func (h *handler) Open(timestamp time.Time, uuid string, id *inetdiag.SockID) {
 }
 
 // Close does nothing.  Timeouts are the authoritative closing mechanism.
-func (h *handler) Close(timestamp time.Time, uuid string) {
+func (h *handler) Close(ctx context.Context, timestamp time.Time, uuid string) {
 }
 
 // New makes a new eventsocket.Handler that informs the demuxer of new flow
