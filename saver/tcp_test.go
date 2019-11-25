@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"os/exec"
 	"reflect"
 	"testing"
 	"time"
@@ -16,6 +17,10 @@ import (
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/go/rtx"
 )
+
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
 
 func TestMinInt(t *testing.T) {
 	for _, c := range []struct{ x, y, want int }{
@@ -276,7 +281,9 @@ func TestSaverWithRealv4Data(t *testing.T) {
 		time.Sleep(time.Millisecond)
 	}
 
-	log.Println("reading data from", dir+"/2000/01/02/testUUID.pcap")
+	log.Println("reading data from", dir+"/2000/01/02/testUUID.pcap.gz")
+	rtx.Must(exec.Command("gunzip", dir+"/2000/01/02/testUUID.pcap.gz").Run(), "Could not unzip")
+
 	handle, err := pcap.OpenOffline(dir + "/2000/01/02/testUUID.pcap")
 	rtx.Must(err, "Could not open written pcap file")
 	ps := gopacket.NewPacketSource(handle, handle.LinkType())
@@ -352,6 +359,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 	}
 
 	log.Println("reading data from", dir+"/2000/01/02/testUUID.pcap")
+	rtx.Must(exec.Command("gunzip", dir+"/2000/01/02/testUUID.pcap.gz").Run(), "Could not unzip")
 	handle, err := pcap.OpenOffline(dir + "/2000/01/02/testUUID.pcap")
 	rtx.Must(err, "Could not open written pcap file")
 	ps := gopacket.NewPacketSource(handle, handle.LinkType())
