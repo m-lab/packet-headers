@@ -3,6 +3,7 @@ package saver
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"io/ioutil"
 	"log"
@@ -63,7 +64,7 @@ type UUIDEvent struct {
 }
 
 func filename(dir string, e UUIDEvent) (string, string) {
-	return path.Join(dir, e.Timestamp.Format("2006/01/02")), e.UUID + ".pcap"
+	return path.Join(dir, e.Timestamp.Format("2006/01/02")), e.UUID + ".pcap.gz"
 }
 
 type statusSetter interface {
@@ -141,9 +142,10 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 	defer derivedCancel()
 
 	buff := &bytes.Buffer{}
+	zip := gzip.NewWriter(buff)
 
 	// Write PCAP data to the buffer.
-	w := pcapgo.NewWriterNanos(buff)
+	w := pcapgo.NewWriterNanos(zip)
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingpackets")
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
@@ -187,6 +189,8 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 		}
 		t.savePacket(w, p, headerLen)
 	}
+	zip.Close()
+	// buff now contains a complete .gz file, complete with footer.
 
 	// Read the UUID to determine the filename
 	t.state.Set("uuidwait")

@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"log"
 	"os"
+	"os/exec"
 	"sync"
 	"testing"
 	"time"
@@ -165,14 +166,15 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	var err1, err2 error
 	err1 = errors.New("start out with an error")
 	for err1 != nil || err2 != nil {
-		_, err1 = os.Stat(dir + "/2013/10/31/flow1.pcap")
-		_, err2 = os.Stat(dir + "/2013/10/30/flow2.pcap")
+		_, err1 = os.Stat(dir + "/2013/10/31/flow1.pcap.gz")
+		_, err2 = os.Stat(dir + "/2013/10/30/flow2.pcap.gz")
 		time.Sleep(100 * time.Millisecond)
 	}
 
 	// Verify the files' contents.
+	rtx.Must(exec.Command("gunzip", dir+"/2013/10/31/flow1.pcap.gz").Run(), "Could not unzip flow1")
 	handle, err = pcap.OpenOffline(dir + "/2013/10/31/flow1.pcap")
-	rtx.Must(err, "Could not open golden pcap file")
+	rtx.Must(err, "Could not open golden pcap file: flow1.pcap")
 	ps = gopacket.NewPacketSource(handle, handle.LinkType())
 	v4 := make([]gopacket.Packet, 0)
 	for p := range ps.Packets() {
@@ -182,8 +184,9 @@ func TestTCPWithRealPcaps(t *testing.T) {
 		t.Errorf("%+v should have length 12 not %d", v4, len(v4))
 	}
 
+	rtx.Must(exec.Command("gunzip", dir+"/2013/10/30/flow2.pcap.gz").Run(), "Could not unzip flow2")
 	handle, err = pcap.OpenOffline(dir + "/2013/10/30/flow2.pcap")
-	rtx.Must(err, "Could not open golden pcap file")
+	rtx.Must(err, "Could not open golden pcap file: flow2.pcap")
 	ps = gopacket.NewPacketSource(handle, handle.LinkType())
 	v6 := make([]gopacket.Packet, 0)
 	for p := range ps.Packets() {
