@@ -129,6 +129,14 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	defer metrics.SaversStopped.Inc()
 	defer t.state.Done()
 
+	t.savePackets(ctx, duration)
+	t.discardPackets(ctx)
+}
+
+// savePackets takes packet from the pchan, anonymizes them and buffers the
+// resulting pcap file in RAM. Once the passed-in duration has passed, it writes
+// the resulting file to disk.
+func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
@@ -212,9 +220,14 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 	err = ioutil.WriteFile(fullFilename, buff.Bytes(), 0664)
 	if err != nil {
 		t.error("filewrite")
+		return
 	}
 	log.Println("Successfully wrote", fullFilename)
+}
 
+// discardPackets keeps the packet channel empty by throwing away all incoming
+// packets.
+func (t *TCP) discardPackets(ctx context.Context) {
 	t.state.Set("discardingpackets")
 	// Now read until the channel is closed or the passed-in context is cancelled.
 	keepDiscarding := true
