@@ -23,6 +23,7 @@ import (
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/packet-headers/demuxer"
 	"github.com/m-lab/packet-headers/muxer"
+	"github.com/m-lab/packet-headers/saver"
 	"github.com/m-lab/packet-headers/tcpinfohandler"
 	"github.com/m-lab/tcp-info/eventsocket"
 )
@@ -67,6 +68,10 @@ func main() {
 
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
+
+	if saver.UUIDDelay > *captureDuration {
+		rtx.Must(fmt.Errorf("Capture delay must be greater than saver.UUIDDelay: %s", saver.UUIDDelay), "")
+	}
 
 	// Special case for argument "-interface": if no specific interface was
 	// specified, then "all of them" was implicitly specified. If new interfaces

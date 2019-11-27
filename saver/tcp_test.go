@@ -116,6 +116,54 @@ func TestSaverDryRun(t *testing.T) {
 	}
 }
 
+func TestSaverWithUUID(t *testing.T) {
+	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
+	rtx.Must(err, "Could not create tempdir")
+	defer os.RemoveAll(dir)
+
+	s := newTCP(dir, anonymize.New(anonymize.None))
+	tracker := statusTracker{status: s.state.Get()}
+	s.state = &tracker
+
+	h, err := pcap.OpenOffline("../testdata/v4.pcap")
+	rtx.Must(err, "Could not open v4.pcap")
+	ps := gopacket.NewPacketSource(h, h.LinkType())
+	var packets []gopacket.Packet
+	for p := range ps.Packets() {
+		packets = append(packets, p)
+	}
+	// Send first half of packets.
+	for i := 0; i < len(packets)/2; i++ {
+		s.Pchan <- packets[i]
+	}
+	// Send a UUID.
+	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	go func() {
+		defer cancel()
+		s.start(ctx, 10*time.Second)
+	}()
+
+	time.Sleep(6)
+	for i := len(packets) / 2; i < len(packets); i++ {
+		s.Pchan <- packets[i]
+	}
+	close(s.Pchan)
+	<-ctx.Done()
+
+	expected := statusTracker{
+		status: "stopped",
+		past:   []string{"notstarted", "readingpackets", "uuidwait", "dircreation", "savingfile", "discardingpackets"},
+	}
+	if !reflect.DeepEqual(&tracker, &expected) {
+		t.Errorf("%+v != %+v", &tracker, &expected)
+	}
+	if s.State() != "stopped" {
+		t.Errorf("%s != 'stopped'", s.State())
+	}
+}
+
 func TestSaverNoUUID(t *testing.T) {
 	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
 	rtx.Must(err, "Could not create tempdir")

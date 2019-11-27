@@ -20,6 +20,11 @@ import (
 	"github.com/m-lab/packet-headers/metrics"
 )
 
+// UUIDDelay is the amount of time the TCP saver waits for a UUID before
+// deciding to discard all additional packets or continue saving for up to
+// maxDuration.
+var UUIDDelay = 5 * time.Second
+
 // A nice example of why go generics might be nice sometimes.
 func minInt(x, y int) int {
 	if x <= y {
@@ -138,6 +143,8 @@ func (t *TCP) start(ctx context.Context, duration time.Duration) {
 // resulting pcap file in RAM. Once the passed-in duration has passed, it writes
 // the resulting file to disk.
 func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
+	uuidCtx, uuidCancel := context.WithTimeout(ctx, UUIDDelay)
+	defer uuidCancel()
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
@@ -182,15 +189,15 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
 	t.savePacket(w, p, headerLen)
+
+	// Read packets for the first UUIDDelay seconds.
 	for {
-		p, ok := t.readPacket(derivedCtx)
+		p, ok := t.readPacket(uuidCtx)
 		if !ok {
 			break
 		}
 		t.savePacket(w, p, headerLen)
 	}
-	zip.Close()
-	// buff now contains a complete .gz file, complete with footer.
 
 	// Read the UUID to determine the filename
 	t.state.Set("uuidwait")
@@ -203,11 +210,26 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 			return
 		}
 	default:
+<<<<<<< HEAD
 		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
+=======
+		log.Println("UUID did not arraive; PCAP capture cancelled with no UUID")
+>>>>>>> 5-25 split around uuid
 		t.error("uuid")
 		return
 	}
 	// uuidEvent is now set to a good value.
+
+	// Continue reading packets until duration seconds.
+	for {
+		p, ok := t.readPacket(derivedCtx)
+		if !ok {
+			break
+		}
+		t.savePacket(w, p, headerLen)
+	}
+	zip.Close()
+	// buff now contains a complete .gz file, complete with footer.
 
 	// Create a file and directory based on the UUID and the time.
 	t.state.Set("dircreation")
@@ -292,9 +314,13 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 	// 125KB for channel capacity and 12.5MB of actual packet data.
 	//
 	// If synchronization between UUID creation and packet collection is off by
+<<<<<<< HEAD
 	// more than 10 ms, packets may be missed. However, under load testing we
 	// never observed capacity greater than 8K. Conditions that are worse than
 	// load testing will have bigger problems.
+=======
+	// more than a second, things are messed up.
+>>>>>>> 5-25 split around uuid
 	pchan := make(chan gopacket.Packet, 8192)
 
 	// There should only ever be (at most) one write to the UUIDchan, so a
