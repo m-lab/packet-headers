@@ -19,6 +19,31 @@ func fakePcapOpenLive(device string, snaplen int32, promisc bool, timeout time.D
 	return pcap.OpenOffline("testdata/v6.pcap")
 }
 
+func TestMainBadDuration(t *testing.T) {
+	// Set to be larger than the capture duration.
+	*uuidWaitDuration = 60 * time.Second
+	origFatalf := logFatalf
+	defer func() {
+		logFatalf = origFatalf
+		*uuidWaitDuration = 5 * time.Second
+	}()
+
+	visit := 0
+	// Override logFatal used by main.
+	logFatalf = func(format string, v ...interface{}) {
+		// Record the fact that this function was called.
+		visit++
+	}
+
+	main()
+
+	// Assert that the fatal function was called.
+	if visit == 0 {
+		t.Error("Failed to trigger error when flags were invalid")
+	}
+
+}
+
 func TestMainSmokeTest(t *testing.T) {
 	mainCtx, mainCancel = context.WithCancel(context.Background())
 	*prometheusx.ListenAddress = ":0"

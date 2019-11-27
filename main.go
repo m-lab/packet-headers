@@ -23,18 +23,18 @@ import (
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/packet-headers/demuxer"
 	"github.com/m-lab/packet-headers/muxer"
-	"github.com/m-lab/packet-headers/saver"
 	"github.com/m-lab/packet-headers/tcpinfohandler"
 	"github.com/m-lab/tcp-info/eventsocket"
 )
 
 var (
-	dir             = flag.String("datadir", ".", "The directory to which data is written")
-	eventSocket     = flag.String("eventsocket", "", "The absolute pathname of the unix-domain socket to which events will be posted.")
-	captureDuration = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
-	flowTimeout     = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
-	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
-	sigtermWaitTime = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
+	dir              = flag.String("datadir", ".", "The directory to which data is written")
+	eventSocket      = flag.String("eventsocket", "", "The absolute pathname of the unix-domain socket to which events will be posted.")
+	captureDuration  = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
+	uuidWaitDuration = flag.Duration("uuidwaitduration", 5*time.Second, "Wait up to uuidwaitduration for each flow before either assigning a UUID or discarding all future packets. This prevents buffering unsaveable packets.")
+	flowTimeout      = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
+	maxHeaderSize    = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
+	sigtermWaitTime  = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 
 	interfaces flagx.StringArray
 
@@ -63,14 +63,17 @@ func catch(sig os.Signal) {
 	}
 }
 
+var logFatalf = log.Fatalf
+
 func main() {
 	defer mainCancel()
 
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
 
-	if saver.UUIDDelay > *captureDuration {
-		rtx.Must(fmt.Errorf("Capture delay must be greater than saver.UUIDDelay: %s", saver.UUIDDelay), "")
+	if *uuidWaitDuration > *captureDuration {
+		logFatalf("Capture duration must be greater than UUID wait duration: %s vs %s", *captureDuration, *uuidWaitDuration)
+		return
 	}
 
 	// Special case for argument "-interface": if no specific interface was
@@ -105,7 +108,7 @@ func main() {
 	}()
 
 	// Get ready to save the incoming packets to files.
-	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *captureDuration)
+	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration, *captureDuration)
 
 	// Inform the demuxer of new UUIDs
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)
