@@ -73,11 +73,11 @@ func processFlags() error {
 	}
 
 	// Special case for argument "-interface": if no specific interface was
-	// specified, then "all of them" was implicitly specified. If new interfaces
-	// are created after capture is started, traffic on those interfaces will be
-	// ignored. If interfaces disappear, the effects are unknown. The number of
-	// interfaces with a running capture is tracked in the
-	// pcap_muxer_interfaces_with_captures metric.
+	// explicitly specified, then "all of them" was implicitly specified. If new
+	// interfaces are created after capture is started, traffic on those
+	// interfaces will be ignored. If interfaces disappear, the effects are
+	// unknown. The number of interfaces with a running capture is tracked in
+	// the pcap_muxer_interfaces_with_captures metric.
 	if len(interfaces) == 0 {
 		log.Println("No interfaces specified, will listen for packets on all available interfaces.")
 		ifaces, err := netInterfaces()
