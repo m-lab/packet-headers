@@ -30,11 +30,24 @@ func TestProcessFlags(t *testing.T) {
 	defer func() {
 		// Reset function pointer.
 		netInterfaces = net.Interfaces
+		interfaces = flagx.StringArray{}
 	}()
 
 	_, err := processFlags()
 	if err == nil {
 		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
+	}
+
+	interfaces = flagx.StringArray{"lo"}
+	ifaces, err := processFlags()
+	if err != nil || len(ifaces) != 1 {
+		t.Fatalf("processFlags() did not get the loopback: %s, %+v", err, ifaces)
+	}
+
+	interfaces = flagx.StringArray{"doesnotexist"}
+	_, err = processFlags()
+	if err == nil {
+		t.Fatalf("processFlags() return wrong error; got nil")
 	}
 
 	// Artificially set uuid wait duration to be longer than capture duration.
