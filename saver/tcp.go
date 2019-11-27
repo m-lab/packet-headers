@@ -211,7 +211,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	}
 	// uuidEvent is now set to a good value.
 
-	// Continue reading packets until duration seconds.
+	// Continue reading packets until duration has elapsed.
 	for {
 		p, ok := t.readPacket(derivedCtx)
 		if !ok {
