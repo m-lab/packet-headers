@@ -38,7 +38,7 @@ func TestTCPDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, time.Second)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second)
 
 	// While we have a demuxer created, make sure that the processing path for
 	// packets does not crash when given a nil packet.
@@ -60,7 +60,7 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, time.Second)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -225,7 +225,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 30*time.Second)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 	var wg sync.WaitGroup

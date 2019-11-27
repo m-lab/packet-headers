@@ -20,11 +20,6 @@ import (
 	"github.com/m-lab/packet-headers/metrics"
 )
 
-// UUIDDelay is the amount of time the TCP saver waits for a UUID before
-// deciding to discard all additional packets or continue saving for up to
-// maxDuration.
-var UUIDDelay = 5 * time.Second
-
 // A nice example of why go generics might be nice sometimes.
 func minInt(x, y int) int {
 	if x <= y {
@@ -130,20 +125,20 @@ func (t *TCP) error(cause string) {
 }
 
 // Start the process of reading the data and saving it to a file.
-func (t *TCP) start(ctx context.Context, duration time.Duration) {
+func (t *TCP) start(ctx context.Context, uuidDelay, duration time.Duration) {
 	metrics.SaversStarted.Inc()
 	defer metrics.SaversStopped.Inc()
 	defer t.state.Done()
 
-	t.savePackets(ctx, duration)
+	t.savePackets(ctx, uuidDelay, duration)
 	t.discardPackets(ctx)
 }
 
 // savePackets takes packet from the pchan, anonymizes them and buffers the
 // resulting pcap file in RAM. Once the passed-in duration has passed, it writes
 // the resulting file to disk.
-func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
-	uuidCtx, uuidCancel := context.WithTimeout(ctx, UUIDDelay)
+func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration) {
+	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
 	defer uuidCancel()
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
@@ -210,7 +205,7 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 			return
 		}
 	default:
-		log.Println("UUID did not arraive; PCAP capture cancelled with no UUID")
+		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID")
 		t.error("uuid")
 		return
 	}
@@ -339,8 +334,9 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 // expected for that flow.
 //
 // It is the caller's responsibility to close Pchan or cancel the context.
-func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, maxDuration time.Duration) *TCP {
+// uuidDelay must be smaller than maxDuration.
+func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration) *TCP {
 	s := newTCP(dir, anon)
-	go s.start(ctx, maxDuration)
+	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }

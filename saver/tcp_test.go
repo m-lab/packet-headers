@@ -103,7 +103,7 @@ func TestSaverDryRun(t *testing.T) {
 		cancel()
 	}()
 
-	s.start(ctx, 10*time.Second) // Give the disk IO 10 seconds to happen.
+	s.start(ctx, 5*time.Second, 10*time.Second) // Give the disk IO 10 seconds to happen.
 	expected := statusTracker{
 		status: "stopped",
 		past:   []string{"notstarted", "readingpackets", "nopacketserror", "discardingpackets"},
@@ -138,17 +138,16 @@ func TestSaverWithUUID(t *testing.T) {
 	}
 	// Send a UUID.
 	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
-	UUIDDelay = 100 * time.Millisecond
 
 	// Run saver in background.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	go func() {
 		defer cancel()
-		s.start(ctx, 2*time.Second)
+		s.start(ctx, 100*time.Millisecond, 2*time.Second)
 	}()
 
-	// Wait for 2x UUIDDelay to move to the second read/save loop.
-	time.Sleep(2 * UUIDDelay)
+	// Wait for 2x UUID wait duration to move to the second read/save loop.
+	time.Sleep(200 * time.Millisecond)
 	for i := len(packets) / 2; i < len(packets); i++ {
 		s.Pchan <- packets[i]
 	}
@@ -187,7 +186,7 @@ func TestSaverNoUUID(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
-	s.start(ctx, 10*time.Second)
+	s.start(ctx, 5*time.Second, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
 		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuiderror", "discardingpackets"},
@@ -218,7 +217,7 @@ func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
 	close(s.Pchan)
 	close(s.UUIDchan)
 
-	s.start(context.Background(), 10*time.Second)
+	s.start(context.Background(), 5*time.Second, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
 		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuidchanerror", "discardingpackets"},
@@ -251,7 +250,7 @@ func TestSaverCantMkdir(t *testing.T) {
 	}
 	close(s.Pchan)
 
-	s.start(context.Background(), 10*time.Second)
+	s.start(context.Background(), 5*time.Second, 10*time.Second)
 
 	expected := statusTracker{
 		status: "stopped",
@@ -289,7 +288,7 @@ func TestSaverCantCreate(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
-	s.start(ctx, 100*time.Millisecond)
+	s.start(ctx, 50*time.Millisecond, 100*time.Millisecond)
 
 	expected := statusTracker{
 		status: "stopped",
@@ -312,7 +311,7 @@ func TestSaverWithRealv4Data(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 10*time.Second)
+	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second)
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
@@ -389,7 +388,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 10*time.Second)
+	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second)
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
