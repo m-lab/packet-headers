@@ -210,11 +210,7 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 			return
 		}
 	default:
-<<<<<<< HEAD
-		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
-=======
 		log.Println("UUID did not arraive; PCAP capture cancelled with no UUID")
->>>>>>> 5-25 split around uuid
 		t.error("uuid")
 		return
 	}
@@ -314,13 +310,9 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 	// 125KB for channel capacity and 12.5MB of actual packet data.
 	//
 	// If synchronization between UUID creation and packet collection is off by
-<<<<<<< HEAD
 	// more than 10 ms, packets may be missed. However, under load testing we
 	// never observed capacity greater than 8K. Conditions that are worse than
 	// load testing will have bigger problems.
-=======
-	// more than a second, things are messed up.
->>>>>>> 5-25 split around uuid
 	pchan := make(chan gopacket.Packet, 8192)
 
 	// There should only ever be (at most) one write to the UUIDchan, so a
