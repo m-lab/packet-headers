@@ -63,17 +63,13 @@ func catch(sig os.Signal) {
 	}
 }
 
-var logFatalf = log.Fatalf
+var netInterfaces = net.Interfaces
 
-func main() {
-	defer mainCancel()
-
-	flag.Parse()
-	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
-
+func processFlags() error {
+	// Verify that capture duration is always longer than uuid wait duration.
 	if *uuidWaitDuration > *captureDuration {
-		logFatalf("Capture duration must be greater than UUID wait duration: %s vs %s", *captureDuration, *uuidWaitDuration)
-		return
+		return fmt.Errorf("Capture duration must be greater than UUID wait duration: %s vs %s",
+			*captureDuration, *uuidWaitDuration)
 	}
 
 	// Special case for argument "-interface": if no specific interface was
@@ -84,12 +80,23 @@ func main() {
 	// pcap_muxer_interfaces_with_captures metric.
 	if len(interfaces) == 0 {
 		log.Println("No interfaces specified, will listen for packets on all available interfaces.")
-		ifaces, err := net.Interfaces()
-		rtx.Must(err, "Could not list interfaces")
+		ifaces, err := netInterfaces()
+		if err != nil {
+			return fmt.Errorf("Could not list interfaces: %s", err)
+		}
 		for _, iface := range ifaces {
 			interfaces = append(interfaces, iface.Name)
 		}
 	}
+	return nil
+}
+
+func main() {
+	defer mainCancel()
+
+	flag.Parse()
+	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
+	rtx.Must(processFlags(), "Failed to process flags")
 
 	psrv := prometheusx.MustServeMetrics()
 	defer warnonerror.Close(psrv, "Could not stop metric server")

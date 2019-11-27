@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/m-lab/go/flagx"
 	"github.com/m-lab/go/prometheusx"
 
 	"github.com/google/gopacket/pcap"
@@ -19,29 +22,31 @@ func fakePcapOpenLive(device string, snaplen int32, promisc bool, timeout time.D
 	return pcap.OpenOffline("testdata/v6.pcap")
 }
 
-func TestMainBadDuration(t *testing.T) {
-	// Set to be larger than the capture duration.
-	*uuidWaitDuration = 60 * time.Second
-	origFatalf := logFatalf
+func TestProcessFlags(t *testing.T) {
+	interfaces = flagx.StringArray{}
+	netInterfaces = func() ([]net.Interface, error) {
+		return nil, fmt.Errorf("Fake interfaces error")
+	}
 	defer func() {
-		logFatalf = origFatalf
-		*uuidWaitDuration = 5 * time.Second
+		// Reset function pointer.
+		netInterfaces = net.Interfaces
 	}()
 
-	visit := 0
-	// Override logFatal used by main.
-	logFatalf = func(format string, v ...interface{}) {
-		// Record the fact that this function was called.
-		visit++
+	err := processFlags()
+	if err == nil {
+		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
 	}
 
-	main()
+	// Artificially set uuid wait duration to be longer than capture duration.
+	*uuidWaitDuration = 2 * *captureDuration
+	defer func() {
+		*uuidWaitDuration = *captureDuration / 2
+	}()
 
-	// Assert that the fatal function was called.
-	if visit == 0 {
-		t.Error("Failed to trigger error when flags were invalid")
+	err = processFlags()
+	if err == nil {
+		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
 	}
-
 }
 
 func TestMainSmokeTest(t *testing.T) {
