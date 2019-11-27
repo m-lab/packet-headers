@@ -282,12 +282,19 @@ func (t *TCP) State() string {
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
 func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
-	// With a 1500 byte MTU, this is a ~1 second buffer at a line rate of 10Gbps:
-	//  10e9 bits/second * 1 second * 1/8 bytes/bit * 1/1500 packets/byte = 833333.3 packets
-	// In the worst case, where full packets are captured, this corresponds to 1.25GB of memory.
+	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
+	// 10Gbps:
+	//
+	//    10e9 bits/second * .01 second * 1/8 bytes/bit * 1/1500 packets/byte
+	//       = 8333.3 (rounded to 8192) packets
+	//
+	// In the worst case, where full packets are captured, this corresponds to
+	// 125KB for channel capacity and 12.5MB of actual packet data.
 	//
 	// If synchronization between UUID creation and packet collection is off by
-	// more than a second, things are messed up.
+	// more than 10 ms, packets may be missed. However, under load testing we
+	// never observed capacity greater than 8K. Conditions that are worse than
+	// load testing will have bigger problems.
 	pchan := make(chan gopacket.Packet, 8192)
 
 	// There should only ever be (at most) one write to the UUIDchan, so a
