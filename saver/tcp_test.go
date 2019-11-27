@@ -138,18 +138,23 @@ func TestSaverWithUUID(t *testing.T) {
 	}
 	// Send a UUID.
 	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
+	UUIDDelay = 100 * time.Millisecond
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Run saver in background.
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	go func() {
 		defer cancel()
-		s.start(ctx, 10*time.Second)
+		s.start(ctx, 2*time.Second)
 	}()
 
-	time.Sleep(6)
+	// Wait for 2x UUIDDelay to move to the second read/save loop.
+	time.Sleep(2 * UUIDDelay)
 	for i := len(packets) / 2; i < len(packets); i++ {
 		s.Pchan <- packets[i]
 	}
+	// Close channel saver is using, so that it stops.
 	close(s.Pchan)
+	// Wait until ctx is canceled.
 	<-ctx.Done()
 
 	expected := statusTracker{
