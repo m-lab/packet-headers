@@ -125,19 +125,21 @@ func (t *TCP) error(cause string) {
 }
 
 // Start the process of reading the data and saving it to a file.
-func (t *TCP) start(ctx context.Context, duration time.Duration) {
+func (t *TCP) start(ctx context.Context, uuidDelay, duration time.Duration) {
 	metrics.SaversStarted.Inc()
 	defer metrics.SaversStopped.Inc()
 	defer t.state.Done()
 
-	t.savePackets(ctx, duration)
+	t.savePackets(ctx, uuidDelay, duration)
 	t.discardPackets(ctx)
 }
 
 // savePackets takes packet from the pchan, anonymizes them and buffers the
 // resulting pcap file in RAM. Once the passed-in duration has passed, it writes
 // the resulting file to disk.
-func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
+func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration) {
+	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
+	defer uuidCancel()
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
@@ -182,15 +184,15 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 	// Write out the header and the first packet.
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
 	t.savePacket(w, p, headerLen)
+
+	// Read packets for the first uuid wait duration seconds.
 	for {
-		p, ok := t.readPacket(derivedCtx)
+		p, ok := t.readPacket(uuidCtx)
 		if !ok {
 			break
 		}
 		t.savePacket(w, p, headerLen)
 	}
-	zip.Close()
-	// buff now contains a complete .gz file, complete with footer.
 
 	// Read the UUID to determine the filename
 	t.state.Set("uuidwait")
@@ -203,11 +205,22 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 			return
 		}
 	default:
-		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
+		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID")
 		t.error("uuid")
 		return
 	}
 	// uuidEvent is now set to a good value.
+
+	// Continue reading packets until duration has elapsed.
+	for {
+		p, ok := t.readPacket(derivedCtx)
+		if !ok {
+			break
+		}
+		t.savePacket(w, p, headerLen)
+	}
+	zip.Close()
+	// buff now contains a complete .gz file, complete with footer.
 
 	// Create a file and directory based on the UUID and the time.
 	t.state.Set("dircreation")
@@ -321,8 +334,9 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 // expected for that flow.
 //
 // It is the caller's responsibility to close Pchan or cancel the context.
-func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, maxDuration time.Duration) *TCP {
+// uuidDelay must be smaller than maxDuration.
+func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration) *TCP {
 	s := newTCP(dir, anon)
-	go s.start(ctx, maxDuration)
+	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }

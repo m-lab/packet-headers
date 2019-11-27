@@ -2,12 +2,15 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
+	"net"
 	"os"
 	"syscall"
 	"testing"
 	"time"
 
+	"github.com/m-lab/go/flagx"
 	"github.com/m-lab/go/prometheusx"
 
 	"github.com/google/gopacket/pcap"
@@ -17,6 +20,33 @@ import (
 
 func fakePcapOpenLive(device string, snaplen int32, promisc bool, timeout time.Duration) (*pcap.Handle, error) {
 	return pcap.OpenOffline("testdata/v6.pcap")
+}
+
+func TestProcessFlags(t *testing.T) {
+	interfaces = flagx.StringArray{}
+	netInterfaces = func() ([]net.Interface, error) {
+		return nil, fmt.Errorf("Fake interfaces error")
+	}
+	defer func() {
+		// Reset function pointer.
+		netInterfaces = net.Interfaces
+	}()
+
+	err := processFlags()
+	if err == nil {
+		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
+	}
+
+	// Artificially set uuid wait duration to be longer than capture duration.
+	*uuidWaitDuration = 2 * *captureDuration
+	defer func() {
+		*uuidWaitDuration = *captureDuration / 2
+	}()
+
+	err = processFlags()
+	if err == nil {
+		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
+	}
 }
 
 func TestMainSmokeTest(t *testing.T) {

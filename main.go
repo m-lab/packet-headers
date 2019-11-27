@@ -28,12 +28,13 @@ import (
 )
 
 var (
-	dir             = flag.String("datadir", ".", "The directory to which data is written")
-	eventSocket     = flag.String("eventsocket", "", "The absolute pathname of the unix-domain socket to which events will be posted.")
-	captureDuration = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
-	flowTimeout     = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
-	maxHeaderSize   = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
-	sigtermWaitTime = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
+	dir              = flag.String("datadir", ".", "The directory to which data is written")
+	eventSocket      = flag.String("eventsocket", "", "The absolute pathname of the unix-domain socket to which events will be posted.")
+	captureDuration  = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
+	uuidWaitDuration = flag.Duration("uuidwaitduration", 5*time.Second, "Wait up to uuidwaitduration for each flow before either assigning a UUID or discarding all future packets. This prevents buffering unsaveable packets.")
+	flowTimeout      = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
+	maxHeaderSize    = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
+	sigtermWaitTime  = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 
 	interfaces flagx.StringArray
 
@@ -62,11 +63,14 @@ func catch(sig os.Signal) {
 	}
 }
 
-func main() {
-	defer mainCancel()
+var netInterfaces = net.Interfaces
 
-	flag.Parse()
-	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
+func processFlags() error {
+	// Verify that capture duration is always longer than uuid wait duration.
+	if *uuidWaitDuration > *captureDuration {
+		return fmt.Errorf("Capture duration must be greater than UUID wait duration: %s vs %s",
+			*captureDuration, *uuidWaitDuration)
+	}
 
 	// Special case for argument "-interface": if no specific interface was
 	// specified, then "all of them" was implicitly specified. If new interfaces
@@ -76,12 +80,23 @@ func main() {
 	// pcap_muxer_interfaces_with_captures metric.
 	if len(interfaces) == 0 {
 		log.Println("No interfaces specified, will listen for packets on all available interfaces.")
-		ifaces, err := net.Interfaces()
-		rtx.Must(err, "Could not list interfaces")
+		ifaces, err := netInterfaces()
+		if err != nil {
+			return fmt.Errorf("Could not list interfaces: %s", err)
+		}
 		for _, iface := range ifaces {
 			interfaces = append(interfaces, iface.Name)
 		}
 	}
+	return nil
+}
+
+func main() {
+	defer mainCancel()
+
+	flag.Parse()
+	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
+	rtx.Must(processFlags(), "Failed to process flags")
 
 	psrv := prometheusx.MustServeMetrics()
 	defer warnonerror.Close(psrv, "Could not stop metric server")
@@ -100,7 +115,7 @@ func main() {
 	}()
 
 	// Get ready to save the incoming packets to files.
-	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *captureDuration)
+	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration, *captureDuration)
 
 	// Inform the demuxer of new UUIDs
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)

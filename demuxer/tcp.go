@@ -36,9 +36,10 @@ type TCP struct {
 	oldFlows     map[FlowKey]*saver.TCP
 
 	// Variables required for the construction of new Savers
-	maxDuration time.Duration
-	anon        anonymize.IPAnonymizer
-	dataDir     string
+	maxDuration      time.Duration
+	uuidWaitDuration time.Duration
+	anon             anonymize.IPAnonymizer
+	dataDir          string
 }
 
 // GetSaver returns a saver with channels for packets and a uuid.
@@ -52,7 +53,7 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 		if ok {
 			delete(d.oldFlows, flow)
 		} else {
-			t = saver.StartNew(ctx, d.anon, d.dataDir, d.maxDuration)
+			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration)
 		}
 		d.currentFlows[flow] = t
 	}
@@ -140,7 +141,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, maxFlowDuration time.Duration) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
@@ -149,8 +150,9 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, maxFlowDuration time.Du
 		currentFlows: make(map[FlowKey]*saver.TCP),
 		oldFlows:     make(map[FlowKey]*saver.TCP),
 
-		anon:        anon,
-		dataDir:     dataDir,
-		maxDuration: maxFlowDuration,
+		anon:             anon,
+		dataDir:          dataDir,
+		maxDuration:      maxFlowDuration,
+		uuidWaitDuration: uuidWaitDuration,
 	}
 }
