@@ -202,7 +202,7 @@ func (t *TCP) savePackets(ctx context.Context, duration time.Duration) {
 			t.error("uuidchan")
 			return
 		}
-	case <-ctx.Done():
+	default:
 		log.Println("Context cancelled, PCAP capture cancelled with no UUID")
 		t.error("uuid")
 		return
@@ -288,7 +288,7 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 	//
 	// If synchronization between UUID creation and packet collection is off by
 	// more than a second, things are messed up.
-	pchan := make(chan gopacket.Packet, 833333)
+	pchan := make(chan gopacket.Packet, 8192)
 
 	// There should only ever be (at most) one write to the UUIDchan, so a
 	// capacity of 1 means that the write should never block.
