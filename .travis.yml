@@ -1,5 +1,9 @@
 language: go
 
+before_install:
+- echo '{"ipv6":true,"fixed-cidr-v6":"2001:db8:1::/64"}' | sudo tee /etc/docker/daemon.json
+- sudo service docker restart
+
 install:
 - sudo apt-get update && sudo apt-get install -y libpcap-dev
 - go get -v -t ./...

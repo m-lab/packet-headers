@@ -83,22 +83,21 @@ func TestMuxPacketsUntilContextCancellation(t *testing.T) {
 }
 
 func TestMustMakeFilter(t *testing.T) {
-	f := mustMakeFilter([]string{"lo"})
+	lo, err := net.InterfaceByName("lo")
+	rtx.Must(err, "Could not get loopback interface")
+	f := mustMakeFilter([]net.Interface{*lo})
 	if f != "tcp" {
 		t.Error("loopback resulted in non-empty filter")
 	}
-	f = mustMakeFilter([]string{})
+	f = mustMakeFilter([]net.Interface{})
 	if f != "tcp" {
 		t.Error("empty interface list resulted in non-empty filter")
 	}
-	ifaces, err := net.Interfaces()
-	ifNames := []string{}
-	for _, iface := range ifaces {
-		ifNames = append(ifNames, iface.Name)
-	}
 
+	// Now check all the interfaces on the local host, just as a sanity check.
+	ifaces, err := net.Interfaces()
 	rtx.Must(err, "Could not get interface list")
-	f = mustMakeFilter(ifNames)
+	f = mustMakeFilter(ifaces)
 	if f == "" {
 		t.Error("Non-empty interface list resulted in empty filter")
 	}
@@ -125,7 +124,7 @@ func TestMustCaptureOnInterfaces(t *testing.T) {
 	go func() {
 		MustCaptureTCPOnInterfaces(
 			context.Background(),
-			[]string{"../testdata/v4.pcap", "../testdata/v6.pcap"},
+			[]net.Interface{{Name: "../testdata/v4.pcap"}, {Name: "../testdata/v6.pcap"}},
 			packets,
 			fakePcapOpenLive,
 			0,

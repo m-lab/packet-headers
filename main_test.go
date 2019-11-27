@@ -32,7 +32,7 @@ func TestProcessFlags(t *testing.T) {
 		netInterfaces = net.Interfaces
 	}()
 
-	err := processFlags()
+	_, err := processFlags()
 	if err == nil {
 		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
 	}
@@ -43,7 +43,7 @@ func TestProcessFlags(t *testing.T) {
 		*uuidWaitDuration = *captureDuration / 2
 	}()
 
-	err = processFlags()
+	_, err = processFlags()
 	if err == nil {
 		t.Fatalf("processFlags() return wrong error; got nil, want %q", err)
 	}

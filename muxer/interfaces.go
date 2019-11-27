@@ -58,17 +58,15 @@ func muxPackets(ctx context.Context, in []<-chan gopacket.Packet, out chan<- gop
 	close(out)
 }
 
-func mustMakeFilter(interfaces []string) string {
+func mustMakeFilter(interfaces []net.Interface) string {
 	filters := []string{}
-	for _, ifName := range interfaces {
-		iface, err := netInterfaceByName(ifName)
-		rtx.Must(err, "Could not get named interface %s", ifName)
-		if iface == nil || iface.Flags&net.FlagLoopback != 0 {
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 {
 			// Skip nil interfaces and loopback addresses
 			continue
 		}
 		addrs, err := iface.Addrs()
-		rtx.Must(err, "Could not get addresses for interface %s", ifName)
+		rtx.Must(err, "Could not get addresses for interface %s", iface.Name)
 		for _, addr := range addrs {
 			a := addr.String()
 			if strings.Contains(a, "/") {
@@ -90,7 +88,7 @@ func mustMakeFilter(interfaces []string) string {
 // MustCaptureTCPOnInterfaces fires off a packet capture on every one of the
 // passed-in list of interfaces, and then muxes the resulting packet streams to
 // all be sent to the passed-in packets channel.
-func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []string, packets chan<- gopacket.Packet, pcapOpenLive PcapHandleOpener, maxHeaderSize int32) {
+func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []net.Interface, packets chan<- gopacket.Packet, pcapOpenLive PcapHandleOpener, maxHeaderSize int32) {
 	// Capture packets on every interface.
 	packetCaptures := make([]<-chan gopacket.Packet, 0)
 	// Only capture packets destined for a non-localhost local IP.
@@ -98,7 +96,7 @@ func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []string, packet
 	log.Printf("Using BPF filter %q\n", filter)
 	for _, iface := range interfaces {
 		// Open a packet capture
-		handle, err := pcapOpenLive(iface, maxHeaderSize, true, pcap.BlockForever)
+		handle, err := pcapOpenLive(iface.Name, maxHeaderSize, true, pcap.BlockForever)
 		rtx.Must(err, "Could not create libpcap client for %q", iface)
 		rtx.Must(handle.SetBPFFilter(filter), "Could not set up BPF filter for TCP")
 
