@@ -185,7 +185,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
 	t.savePacket(w, p, headerLen)
 
-	// Read packets for the first UUIDDelay seconds.
+	// Read packets for the first uuid wait duration seconds.
 	for {
 		p, ok := t.readPacket(uuidCtx)
 		if !ok {
