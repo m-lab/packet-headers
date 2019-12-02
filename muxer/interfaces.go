@@ -95,7 +95,7 @@ func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []net.Interface,
 	filter := mustMakeFilter(interfaces)
 	log.Printf("Using BPF filter %q\n", filter)
 	for _, iface := range interfaces {
-		// Open a packet capture
+		// Open a packet capture. "false" means promiscuous mode is off.
 		handle, err := pcapOpenLive(iface.Name, maxHeaderSize, false, pcap.BlockForever)
 		rtx.Must(err, "Could not create libpcap client for %q", iface)
 		rtx.Must(handle.SetBPFFilter(filter), "Could not set up BPF filter for TCP")
