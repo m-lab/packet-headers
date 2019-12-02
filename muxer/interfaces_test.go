@@ -2,9 +2,12 @@ package muxer
 
 import (
 	"context"
+	"net"
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/google/gopacket/layers"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
@@ -79,18 +82,49 @@ func TestMuxPacketsUntilContextCancellation(t *testing.T) {
 
 }
 
+func TestMustMakeFilter(t *testing.T) {
+	lo, err := net.InterfaceByName("lo")
+	rtx.Must(err, "Could not get loopback interface")
+	f := mustMakeFilter([]net.Interface{*lo})
+	if f != "tcp" {
+		t.Error("loopback resulted in non-empty filter")
+	}
+	f = mustMakeFilter([]net.Interface{})
+	if f != "tcp" {
+		t.Error("empty interface list resulted in non-empty filter")
+	}
+
+	// Now check all the interfaces on the local host, just as a sanity check.
+	ifaces, err := net.Interfaces()
+	rtx.Must(err, "Could not get interface list")
+	f = mustMakeFilter(ifaces)
+	if f == "" {
+		t.Error("Non-empty interface list resulted in empty filter")
+	}
+	// Verify that the filter is a well-formed BPF filter.
+	_, err = pcap.NewBPF(layers.LinkTypeEthernet, 256, f)
+	rtx.Must(err, "Could not parse bpf %q", f)
+}
+
 func fakePcapOpenLive(filename string, _ int32, _ bool, _ time.Duration) (*pcap.Handle, error) {
 	return pcap.OpenOffline(filename)
 }
 
+func fakeInterfaceByName(name string) (*net.Interface, error) {
+	return nil, nil
+}
+
 func TestMustCaptureOnInterfaces(t *testing.T) {
+	netInterfaceByName = fakeInterfaceByName
+	defer func() { netInterfaceByName = net.InterfaceByName }()
+
 	wg := sync.WaitGroup{}
 	packets := make(chan gopacket.Packet)
 	wg.Add(1)
 	go func() {
 		MustCaptureTCPOnInterfaces(
 			context.Background(),
-			[]string{"../testdata/v4.pcap", "../testdata/v6.pcap"},
+			[]net.Interface{{Name: "../testdata/v4.pcap"}, {Name: "../testdata/v6.pcap"}},
 			packets,
 			fakePcapOpenLive,
 			0,

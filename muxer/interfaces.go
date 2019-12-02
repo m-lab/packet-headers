@@ -5,6 +5,9 @@ package muxer
 
 import (
 	"context"
+	"log"
+	"net"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,6 +16,16 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/packet-headers/metrics"
+)
+
+// PcapHandleOpener is a type to allow injection of fake packet captures to aid
+// in testing. It is exactly the type of pcap.OpenLive, and in production code
+// every variable of this type should be set to pcap.OpenLive.
+type PcapHandleOpener func(device string, snaplen int32, promisc bool, timeout time.Duration) (handle *pcap.Handle, _ error)
+
+// Injected functions to support whitebox testing.
+var (
+	netInterfaceByName = net.InterfaceByName
 )
 
 func forwardPackets(ctx context.Context, in <-chan gopacket.Packet, out chan<- gopacket.Packet, wg *sync.WaitGroup) {
@@ -45,22 +58,47 @@ func muxPackets(ctx context.Context, in []<-chan gopacket.Packet, out chan<- gop
 	close(out)
 }
 
-// PcapHandleOpener is a type to allow injection of fake packet captures to aid
-// in testing. It is exactly the type of pcap.OpenLive, and in production code
-// every variable of this type should be set to pcap.OpenLive.
-type PcapHandleOpener func(device string, snaplen int32, promisc bool, timeout time.Duration) (handle *pcap.Handle, _ error)
+func mustMakeFilter(interfaces []net.Interface) string {
+	filters := []string{}
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagLoopback != 0 {
+			// Skip nil interfaces and loopback addresses
+			continue
+		}
+		addrs, err := iface.Addrs()
+		rtx.Must(err, "Could not get addresses for interface %s", iface.Name)
+		for _, addr := range addrs {
+			a := addr.String()
+			if strings.Contains(a, "/") {
+				a = strings.Split(a, "/")[0]
+			}
+			if strings.Contains(a, ":") {
+				filters = append(filters, "ip6 host "+a)
+			} else {
+				filters = append(filters, "ip host "+a)
+			}
+		}
+	}
+	if len(filters) == 0 {
+		return "tcp"
+	}
+	return "tcp and ( " + strings.Join(filters, " or ") + ")"
+}
 
 // MustCaptureTCPOnInterfaces fires off a packet capture on every one of the
 // passed-in list of interfaces, and then muxes the resulting packet streams to
 // all be sent to the passed-in packets channel.
-func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []string, packets chan<- gopacket.Packet, opener PcapHandleOpener, maxHeaderSize int32) {
+func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []net.Interface, packets chan<- gopacket.Packet, pcapOpenLive PcapHandleOpener, maxHeaderSize int32) {
 	// Capture packets on every interface.
 	packetCaptures := make([]<-chan gopacket.Packet, 0)
+	// Only capture packets destined for a non-localhost local IP.
+	filter := mustMakeFilter(interfaces)
+	log.Printf("Using BPF filter %q\n", filter)
 	for _, iface := range interfaces {
-		// Open a packet capture
-		handle, err := opener(iface, maxHeaderSize, true, pcap.BlockForever)
+		// Open a packet capture. "false" means promiscuous mode is off.
+		handle, err := pcapOpenLive(iface.Name, maxHeaderSize, false, pcap.BlockForever)
 		rtx.Must(err, "Could not create libpcap client for %q", iface)
-		rtx.Must(handle.SetBPFFilter("tcp"), "Could not set up BPF filter for TCP")
+		rtx.Must(handle.SetBPFFilter(filter), "Could not set up BPF filter for TCP")
 
 		// Stop packet capture when this function exits.
 		defer handle.Close()

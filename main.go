@@ -65,30 +65,32 @@ func catch(sig os.Signal) {
 
 var netInterfaces = net.Interfaces
 
-func processFlags() error {
+func processFlags() ([]net.Interface, error) {
 	// Verify that capture duration is always longer than uuid wait duration.
 	if *uuidWaitDuration > *captureDuration {
-		return fmt.Errorf("Capture duration must be greater than UUID wait duration: %s vs %s",
+		return nil, fmt.Errorf("Capture duration must be greater than UUID wait duration: %s vs %s",
 			*captureDuration, *uuidWaitDuration)
 	}
 
 	// Special case for argument "-interface": if no specific interface was
-	// specified, then "all of them" was implicitly specified. If new interfaces
-	// are created after capture is started, traffic on those interfaces will be
-	// ignored. If interfaces disappear, the effects are unknown. The number of
-	// interfaces with a running capture is tracked in the
-	// pcap_muxer_interfaces_with_captures metric.
+	// explicitly specified, then "all of them" was implicitly specified. If new
+	// interfaces are created after capture is started, traffic on those
+	// interfaces will be ignored. If interfaces disappear, the effects are
+	// unknown. The number of interfaces with a running capture is tracked in
+	// the pcap_muxer_interfaces_with_captures metric.
 	if len(interfaces) == 0 {
 		log.Println("No interfaces specified, will listen for packets on all available interfaces.")
-		ifaces, err := netInterfaces()
-		if err != nil {
-			return fmt.Errorf("Could not list interfaces: %s", err)
-		}
-		for _, iface := range ifaces {
-			interfaces = append(interfaces, iface.Name)
-		}
+		return netInterfaces()
 	}
-	return nil
+	ifaces := []net.Interface{}
+	for _, iface := range interfaces {
+		i, err := net.InterfaceByName(iface)
+		if err != nil {
+			return ifaces, err
+		}
+		ifaces = append(ifaces, *i)
+	}
+	return ifaces, nil
 }
 
 func main() {
@@ -96,7 +98,8 @@ func main() {
 
 	flag.Parse()
 	rtx.Must(flagx.ArgsFromEnv(flag.CommandLine), "Could not get args from env")
-	rtx.Must(processFlags(), "Failed to process flags")
+	ifaces, err := processFlags()
+	rtx.Must(err, "Failed to process flags")
 
 	psrv := prometheusx.MustServeMetrics()
 	defer warnonerror.Close(psrv, "Could not stop metric server")
@@ -132,7 +135,7 @@ func main() {
 	// Capture packets on every interface.
 	cleanupWG.Add(1)
 	go func() {
-		muxer.MustCaptureTCPOnInterfaces(mainCtx, interfaces, packets, pcapOpenLive, int32(*maxHeaderSize))
+		muxer.MustCaptureTCPOnInterfaces(mainCtx, ifaces, packets, pcapOpenLive, int32(*maxHeaderSize))
 		mainCancel()
 		cleanupWG.Done()
 	}()
