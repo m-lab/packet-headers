@@ -1,6 +1,7 @@
 package demuxer
 
 import (
+	"fmt"
 	"net"
 
 	"github.com/google/gopacket"
@@ -14,6 +15,10 @@ import (
 type FlowKey struct {
 	lo, hi   string
 	loP, hiP uint16
+}
+
+func (f *FlowKey) String() string {
+	return fmt.Sprintf("%s:%d<->%s:%d", net.IP([]byte(f.lo)).String(), f.loP, net.IP([]byte(f.hi)).String(), f.hiP)
 }
 
 // fromPacket converts a packet's TCP 4-tuple into a FlowKey suitable for being
