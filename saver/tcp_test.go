@@ -84,7 +84,7 @@ func TestSaverDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverDryRun")
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -117,11 +117,11 @@ func TestSaverDryRun(t *testing.T) {
 }
 
 func TestSaverWithUUID(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
+	dir, err := ioutil.TempDir("", "TestSaverWithUUID")
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverWithUUID")
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -173,7 +173,7 @@ func TestSaverNoUUID(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverNoUUID")
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -200,11 +200,11 @@ func TestSaverNoUUID(t *testing.T) {
 }
 
 func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
+	dir, err := ioutil.TempDir("", "TestSaverNoUUIDClosedUUIDChan")
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverNoUUIDClosedUUIDChan")
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -236,7 +236,7 @@ func TestSaverCantMkdir(t *testing.T) {
 	rtx.Must(os.Chmod(dir, 0111), "Could not chmod dir to unwriteable")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantMkdir")
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -269,7 +269,7 @@ func TestSaverCantCreate(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None))
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantCreate")
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -311,7 +311,7 @@ func TestSaverWithRealv4Data(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second)
+	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv4Data")
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
@@ -388,7 +388,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second)
+	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv6Data")
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}

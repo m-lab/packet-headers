@@ -115,6 +115,8 @@ type TCP struct {
 	state  statusSetter
 	anon   anonymize.IPAnonymizer
 
+	id string
+
 	stopOnce sync.Once
 }
 
@@ -153,6 +155,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
 	p, ok := t.readPacket(derivedCtx)
 	if !ok {
+		log.Println("PCAP capture cancelled with no packets for flow", t.id)
 		t.error("nopackets")
 		return
 	}
@@ -200,12 +203,12 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	select {
 	case uuidEvent, ok = <-t.uuidchanRead:
 		if !ok {
-			log.Println("UUID channel closed, PCAP capture cancelled with no UUID")
+			log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
 			t.error("uuidchan")
 			return
 		}
 	default:
-		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID")
+		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID for flow", t.id)
 		t.error("uuid")
 		return
 	}
@@ -294,7 +297,7 @@ func (t *TCP) State() string {
 
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
-func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
+func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
 	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
 	// 10Gbps:
 	//
@@ -324,6 +327,7 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 		dir:   dir,
 		state: newStatus("notstarted"),
 		anon:  anon,
+		id:    id,
 	}
 }
 
@@ -335,8 +339,8 @@ func newTCP(dir string, anon anonymize.IPAnonymizer) *TCP {
 //
 // It is the caller's responsibility to close Pchan or cancel the context.
 // uuidDelay must be smaller than maxDuration.
-func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration) *TCP {
-	s := newTCP(dir, anon)
+func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string) *TCP {
+	s := newTCP(dir, anon, id)
 	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }
