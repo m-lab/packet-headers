@@ -19,7 +19,7 @@ type FlowKey struct {
 	loP, hiP uint16
 }
 
-func (f *FlowKey) String(anon anonymize.IPAnonymizer) string {
+func (f *FlowKey) Format(anon anonymize.IPAnonymizer) string {
 	loIP := net.IP([]byte(f.lo)) // This performs a copy.
 	anon.IP(loIP)
 	hiIP := net.IP([]byte(f.hi)) // This performs a copy.

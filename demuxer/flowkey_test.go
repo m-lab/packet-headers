@@ -62,16 +62,16 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 				t.Errorf("%+v != %+v", f1, f2)
 			}
 			nb := anonymize.New(anonymize.Netblock)
-			if f1.String(nb) != tt.netblockStr || f2.String(nb) != tt.netblockStr {
-				t.Errorf("Anonymized should be equal: %q, %q, %q", f1.String(nb), f2.String(nb), tt.netblockStr)
+			if f1.Format(nb) != tt.netblockStr || f2.Format(nb) != tt.netblockStr {
+				t.Errorf("Anonymized should be equal: %q, %q, %q", f1.Format(nb), f2.Format(nb), tt.netblockStr)
 			}
 			// Applying netblock anonymization before applying no anonymization
 			// also tests that the anonymization of the log messages does not
 			// cause the actual data inside the struct to become anonymized
 			// (which would be bad, and mess up the demuxer).
 			none := anonymize.New(anonymize.None)
-			if f1.String(none) != tt.str || f2.String(none) != tt.str {
-				t.Errorf("Strings should be equal: %q, %q, %q", f1.String(none), f2.String(none), tt.str)
+			if f1.Format(none) != tt.str || f2.Format(none) != tt.str {
+				t.Errorf("Strings should be equal: %q, %q, %q", f1.Format(none), f2.Format(none), tt.str)
 			}
 		})
 	}
