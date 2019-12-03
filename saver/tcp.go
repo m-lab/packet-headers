@@ -242,7 +242,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		t.error("filewrite")
 		return
 	}
-	log.Println("Successfully wrote", fullFilename)
+	log.Println("Successfully wrote", fullFilename, "for flow", t.id)
 }
 
 // discardPackets keeps the packet channel empty by throwing away all incoming
