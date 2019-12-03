@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"net"
 
+	"github.com/m-lab/go/anonymize"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 )
@@ -17,8 +19,12 @@ type FlowKey struct {
 	loP, hiP uint16
 }
 
-func (f *FlowKey) String() string {
-	return fmt.Sprintf("%s:%d<->%s:%d", net.IP([]byte(f.lo)).String(), f.loP, net.IP([]byte(f.hi)).String(), f.hiP)
+func (f *FlowKey) Format(anon anonymize.IPAnonymizer) string {
+	loIP := net.IP([]byte(f.lo)) // This performs a copy.
+	anon.IP(loIP)
+	hiIP := net.IP([]byte(f.hi)) // This performs a copy.
+	anon.IP(hiIP)
+	return fmt.Sprintf("%s:%d<->%s:%d", loIP.String(), f.loP, hiIP.String(), f.hiP)
 }
 
 // fromPacket converts a packet's TCP 4-tuple into a FlowKey suitable for being
