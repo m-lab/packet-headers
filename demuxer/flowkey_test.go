@@ -3,6 +3,8 @@ package demuxer
 import (
 	"net"
 	"testing"
+
+	"github.com/m-lab/go/anonymize"
 )
 
 func TestFlowKeyFrom4Tuple(t *testing.T) {
@@ -13,6 +15,7 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 		dstIP   net.IP
 		dstPort uint16
 		str     string
+		anon    anonymize.Method
 	}{
 		{
 			name:    "Different hosts",
@@ -21,6 +24,7 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 			dstIP:   net.ParseIP("192.168.0.1").To4(),
 			dstPort: 1000,
 			str:     "10.1.1.1:2000<->192.168.0.1:1000",
+			anon:    anonymize.None,
 		},
 		{
 			name:    "Same host, different ports",
@@ -28,7 +32,8 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 			srcPort: 2000,
 			dstIP:   net.ParseIP("10.2.3.4").To4(),
 			dstPort: 1000,
-			str:     "10.2.3.4:1000<->10.2.3.4:2000",
+			str:     "10.2.3.0:1000<->10.2.3.0:2000",
+			anon:    anonymize.Netblock,
 		},
 		{
 			name:    "Different v6 hosts",
@@ -37,6 +42,7 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 			dstIP:   net.ParseIP("4:5::").To16(),
 			dstPort: 1000,
 			str:     "2:3:::2000<->4:5:::1000",
+			anon:    anonymize.None,
 		},
 		{
 			name:    "Same v6 host, different ports",
@@ -45,6 +51,7 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 			dstIP:   net.ParseIP("1::").To16(),
 			dstPort: 1000,
 			str:     "1:::1000<->1:::2000",
+			anon:    anonymize.None,
 		},
 	}
 	for _, tt := range tests {
@@ -54,8 +61,9 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 			if f1 != f2 {
 				t.Errorf("%+v != %+v", f1, f2)
 			}
-			if f1.String() != tt.str || f2.String() != tt.str {
-				t.Errorf("Strings should be equal: %q, %q, %q", f1.String(), f2.String(), tt.str)
+			a := anonymize.New(tt.anon)
+			if f1.String(a) != tt.str || f2.String(a) != tt.str {
+				t.Errorf("Strings should be equal: %q, %q, %q", f1.String(a), f2.String(a), tt.str)
 			}
 		})
 	}
