@@ -39,6 +39,12 @@ func (h *handler) Open(ctx context.Context, timestamp time.Time, uuid string, id
 		metrics.BadEventsFromTCPInfo.WithLabelValues("badip").Inc()
 		return
 	}
+	if srcIP.To4() != nil {
+		srcIP = srcIP.To4()
+	}
+	if dstIP.To4() != nil {
+		dstIP = dstIP.To4()
+	}
 	// Can't use a struct literal here due to embedding.
 	ev := demuxer.UUIDEvent{}
 	ev.Flow = demuxer.FlowKeyFrom4Tuple(srcIP, id.SPort, dstIP, id.DPort)
