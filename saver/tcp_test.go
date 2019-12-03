@@ -95,9 +95,9 @@ func TestSaverDryRun(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	// Wait until the status is readingpackets or the surrounding context has been cancelled.
+	// Wait until the status is readingcandidatepackets or the surrounding context has been cancelled.
 	go func() {
-		for s.state.Get() != "readingpackets" && ctx.Err() == nil {
+		for s.state.Get() != "readingcandidatepackets" && ctx.Err() == nil {
 			time.Sleep(1 * time.Millisecond)
 		}
 		cancel()
@@ -106,7 +106,7 @@ func TestSaverDryRun(t *testing.T) {
 	s.start(ctx, 5*time.Second, 10*time.Second) // Give the disk IO 10 seconds to happen.
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "nopacketserror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "nopacketserror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -158,7 +158,7 @@ func TestSaverWithUUID(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "readingpackets-withuuid", "dircreation", "savingfile", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "savingfile", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -189,7 +189,7 @@ func TestSaverNoUUID(t *testing.T) {
 	s.start(ctx, 5*time.Second, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuiderror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuiderror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -220,7 +220,7 @@ func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
 	s.start(context.Background(), 5*time.Second, 10*time.Second)
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "uuidchanerror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -254,7 +254,7 @@ func TestSaverCantMkdir(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "readingpackets-withuuid", "dircreation", "mkdirerror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "mkdirerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -292,7 +292,7 @@ func TestSaverCantCreate(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingpackets", "uuidwait", "readingpackets-withuuid", "dircreation", "savingfile", "filewriteerror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "savingfile", "filewriteerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
