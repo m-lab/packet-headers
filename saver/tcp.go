@@ -155,6 +155,8 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
 	p, ok := t.readPacket(derivedCtx)
 	if !ok {
+		// This error should never occur in production. It indicates a
+		// configuration error or a bug in packet-headers.
 		log.Println("PCAP capture cancelled with no packets for flow", t.id)
 		t.error("nopackets")
 		return
@@ -200,6 +202,13 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Read the UUID to determine the filename
 	t.state.Set("uuidwait")
 	var uuidEvent UUIDEvent
+	// The error conditions below are expected to occur in production. In
+	// particular, every flow that existed prior to the start of the start of
+	// the packet-headers binary will cause this error at least once.
+	//
+	// This error will also occur for long-lived flows that send packets so
+	// infrequently that the flow gets garbage-collected between packet
+	// arrivals.
 	select {
 	case uuidEvent, ok = <-t.uuidchanRead:
 		if !ok {

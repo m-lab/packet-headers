@@ -29,7 +29,6 @@ import (
 
 var (
 	dir              = flag.String("datadir", ".", "The directory to which data is written")
-	eventSocket      = flag.String("eventsocket", "", "The absolute pathname of the unix-domain socket to which events will be posted.")
 	captureDuration  = flag.Duration("captureduration", 30*time.Second, "Only save the first captureduration of each flow, to prevent long-lived flows from spamming the hard drive.")
 	uuidWaitDuration = flag.Duration("uuidwaitduration", 5*time.Second, "Wait up to uuidwaitduration for each flow before either assigning a UUID or discarding all future packets. This prevents buffering unsaveable packets.")
 	flowTimeout      = flag.Duration("flowtimeout", 30*time.Second, "Once there have been no packets for a flow for at least flowtimeout, the flow can be assumed to be closed.")
@@ -45,6 +44,7 @@ var (
 
 func init() {
 	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
 func catch(sig os.Signal) {
@@ -124,7 +124,7 @@ func main() {
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)
 	cleanupWG.Add(1)
 	go func() {
-		eventsocket.MustRun(mainCtx, *eventSocket, h)
+		eventsocket.MustRun(mainCtx, *eventsocket.Filename, h)
 		mainCancel()
 		cleanupWG.Done()
 	}()

@@ -76,13 +76,13 @@ func TestMainSmokeTest(t *testing.T) {
 	// server.
 	tcpiCtx, tcpiCancel := context.WithCancel(context.Background())
 	defer tcpiCancel()
-	*eventSocket = dir + "/tcpevents.sock"
-	tcpi := eventsocket.New(*eventSocket)
+	*eventsocket.Filename = dir + "/tcpevents.sock"
+	tcpi := eventsocket.New(*eventsocket.Filename)
 	tcpi.Listen()
 	go tcpi.Serve(tcpiCtx)
 
 	// Wait until the eventsocket appears.
-	for _, err := os.Stat(*eventSocket); err != nil; _, err = os.Stat(*eventSocket) {
+	for _, err := os.Stat(*eventsocket.Filename); err != nil; _, err = os.Stat(*eventsocket.Filename) {
 	}
 
 	// Tests are unlikely to have enough privileges to open packet captures, so
