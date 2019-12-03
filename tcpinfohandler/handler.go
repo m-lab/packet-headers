@@ -39,6 +39,8 @@ func (h *handler) Open(ctx context.Context, timestamp time.Time, uuid string, id
 		metrics.BadEventsFromTCPInfo.WithLabelValues("badip").Inc()
 		return
 	}
+	// Convert all IPv4 addresses to a 4-byte representation, as required by
+	// FlowKeyFrom4Tuple.
 	if srcIP.To4() != nil {
 		srcIP = srcIP.To4()
 	}

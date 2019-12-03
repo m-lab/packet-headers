@@ -41,10 +41,12 @@ func fromPacket(p gopacket.Packet) FlowKey {
 }
 
 // FlowKeyFrom4Tuple creates a FlowKey (suitable for use as a map key) from a
-// TCP 4-tuple. IPv4 addresses passed in must be 4 bytes, because we do
-// byte-based comparisons with sub-slices of packets retrieved from the wire,
-// and this function needs to be fast, because it is called for every packet, so
-// we do not do that normalization inside this function.
+// TCP 4-tuple. This function is called once per packet, by the demuxer, and
+// once per flow, by the tcpeventsocket handler. Because it is called once per
+// packet, it should be as efficient as possible.
+//
+// IPv4 addresses passed in must be 4 bytes, because we do byte-based
+// comparisons with sub-slices of packets retrieved from the wire.
 func FlowKeyFrom4Tuple(srcIP net.IP, srcPort uint16, dstIP net.IP, dstPort uint16) FlowKey {
 	srcIPS := string(srcIP)
 	dstIPS := string(dstIP)
