@@ -19,6 +19,9 @@ type FlowKey struct {
 	loP, hiP uint16
 }
 
+// Format a FlowKey for inclusion in server logs. In an effort to not
+// accidentally remove anonymization, we allow the IP address in the logs to be
+// anonymized the exact same way as the archived IP address is anonymized.
 func (f *FlowKey) Format(anon anonymize.IPAnonymizer) string {
 	loIP := net.IP([]byte(f.lo)) // This performs a copy.
 	anon.IP(loIP)
