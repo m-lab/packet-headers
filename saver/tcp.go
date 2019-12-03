@@ -151,7 +151,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Write PCAP data to the buffer.
 	w := pcapgo.NewWriterNanos(zip)
 	// Now save packets until the stream is done or the context is canceled.
-	t.state.Set("readingpackets")
+	t.state.Set("readingcandidatepackets")
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
 	p, ok := t.readPacket(derivedCtx)
 	if !ok {
@@ -223,6 +223,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	}
 	// uuidEvent is now set to a good value.
 
+	t.state.Set("readingsavedpackets")
 	// Continue reading packets until duration has elapsed.
 	for {
 		p, ok := t.readPacket(derivedCtx)
