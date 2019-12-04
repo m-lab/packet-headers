@@ -75,14 +75,17 @@ type statusSetter interface {
 
 type status struct {
 	status string
+	mu     sync.Mutex
 }
 
 func newStatus(beginstate string) *status {
 	metrics.SaverCount.WithLabelValues(beginstate).Inc()
-	return &status{beginstate}
+	return &status{status: beginstate}
 }
 
 func (s *status) Set(newstatus string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	var oldstatus string
 	oldstatus, s.status = s.status, newstatus
 	metrics.SaverCount.WithLabelValues(oldstatus).Dec()
@@ -90,11 +93,15 @@ func (s *status) Set(newstatus string) {
 }
 
 func (s *status) Done() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	metrics.SaverCount.WithLabelValues(s.status).Dec()
 	s.status = "stopped"
 }
 
 func (s *status) Get() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.status
 }
 
