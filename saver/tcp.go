@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"io/ioutil"
 	"log"
 	"os"
 	"path"
@@ -197,18 +196,8 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
 	t.savePacket(w, p, headerLen)
 
-	// Read packets for the first uuid wait duration seconds.
-	for {
-		p, ok := t.readPacket(uuidCtx)
-		if !ok {
-			break
-		}
-		t.savePacket(w, p, headerLen)
-	}
-
-	// Read the UUID to determine the filename
 	t.state.Set("uuidwait")
-	var uuidEvent UUIDEvent
+	// Read packets while waiting for uuid event, or uuidCtx expires..
 	// The error conditions below are expected to occur in production. In
 	// particular, every flow that existed prior to the start of the start of
 	// the packet-headers binary will cause this error at least once.
@@ -216,32 +205,35 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// This error will also occur for long-lived flows that send packets so
 	// infrequently that the flow gets garbage-collected between packet
 	// arrivals.
-	select {
-	case uuidEvent, ok = <-t.uuidchanRead:
-		if !ok {
-			log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
-			t.error("uuidchan")
-			return
+	var uuidEvent UUIDEvent
+	doneWaiting := false
+	for !doneWaiting {
+		select {
+		case uuidEvent, ok = <-t.uuidchanRead:
+			if !ok {
+				log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
+				t.error("uuidchan")
+				return
+			}
+			t.state.Set("uuidFound")
+			doneWaiting = true
+		default:
+			p, ok := t.readPacket(uuidCtx)
+			if ok {
+				t.savePacket(w, p, headerLen)
+			} else {
+				doneWaiting = true
+			}
 		}
-	default:
+	}
+
+	if len(uuidEvent.UUID) == 0 {
 		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID for flow", t.id)
 		t.error("uuid")
 		return
 	}
+
 	// uuidEvent is now set to a good value.
-
-	t.state.Set("readingsavedpackets")
-	// Continue reading packets until duration has elapsed.
-	for {
-		p, ok := t.readPacket(derivedCtx)
-		if !ok {
-			break
-		}
-		t.savePacket(w, p, headerLen)
-	}
-	zip.Close()
-	// buff now contains a complete .gz file, complete with footer.
-
 	// Create a file and directory based on the UUID and the time.
 	t.state.Set("dircreation")
 	dir, fname := filename(t.dir, uuidEvent)
@@ -252,13 +244,50 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		return
 	}
 
-	t.state.Set("savingfile")
+	// Write first part of file.
+	t.state.Set("writepartial")
 	fullFilename := path.Join(dir, fname)
-	err = ioutil.WriteFile(fullFilename, buff.Bytes(), 0664)
+	file, err := os.OpenFile(fullFilename, os.O_CREATE, 0664)
 	if err != nil {
-		t.error("filewrite")
+		t.error("fileopen")
 		return
 	}
+	defer file.Close()
+
+	zip.Flush()
+	_, err = file.Write(buff.Bytes())
+	if err != nil {
+		t.error("writepartial")
+		return
+	}
+
+	t.state.Set("streaming")
+
+	t.state.Set("readingsavedpackets")
+	// Continue reading packets until duration has elapsed.
+	for {
+		p, ok := t.readPacket(derivedCtx)
+		if !ok {
+			break
+		}
+		t.savePacket(w, p, headerLen)
+		zip.Flush()
+		_, err := file.Write(buff.Bytes())
+		if err != nil {
+			t.error("streaming")
+			return
+		}
+	}
+
+	zip.Close()
+
+	// buff now contains a complete .gz file, complete with footer.
+	_, err = file.Write(buff.Bytes())
+	if err != nil {
+		t.error("streaming")
+		return
+	}
+
 	log.Println("Successfully wrote", fullFilename, "for flow", t.id)
 }
 
