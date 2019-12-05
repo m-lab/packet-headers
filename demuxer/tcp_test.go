@@ -258,9 +258,9 @@ func TestUUIDWontBlock(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
+	gcTimer := make(chan time.Time)
 	go func() {
 		pChan := make(chan gopacket.Packet)
-		gcTimer := make(chan time.Time)
 		tcpdm.CapturePackets(ctx, pChan, gcTimer)
 		// Does not run forever or crash == success
 		wg.Done()
@@ -270,6 +270,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		tcpdm.UUIDChan <- e
 	}
+	gcTimer <- time.Now()
 	// Lose all channel-read race conditions.
 	time.Sleep(100 * time.Millisecond)
 	// Ensure that reads of that channel never block. If the cancel() has an

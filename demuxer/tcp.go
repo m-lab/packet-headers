@@ -163,6 +163,7 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 
 		currentFlows: make(map[FlowKey]*saver.TCP),
 		oldFlows:     make(map[FlowKey]*saver.TCP),
+		status:       promStatus{},
 
 		anon:             anon,
 		dataDir:          dataDir,
