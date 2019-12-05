@@ -240,7 +240,9 @@ func TestUUIDWontBlock(t *testing.T) {
 
 	// Write to the UUID channel 1000 times (more than exhausting its buffer)
 	for i := 0; i < 1000; i++ {
-		log.Println(i)
+		if i%50 == 0 {
+			log.Println(i)
+		}
 		tcpdm.UUIDChan <- e
 	}
 	// Lose all channel-read race conditions.
