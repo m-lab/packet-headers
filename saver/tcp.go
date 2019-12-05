@@ -215,7 +215,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 				t.error("uuidchan")
 				return
 			}
-			t.state.Set("uuidFound")
+			t.state.Set("uuidfound")
 			doneWaiting = true
 		default:
 			p, ok := t.readPacket(uuidCtx)
@@ -239,6 +239,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	dir, fname := filename(t.dir, uuidEvent)
 	err := os.MkdirAll(dir, 0777)
 	if err != nil {
+		t.state.Set("mkdirerror")
 		log.Println("Could not create directory", dir, err)
 		t.error("mkdir")
 		return
@@ -247,7 +248,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Write first part of file.
 	t.state.Set("writepartial")
 	fullFilename := path.Join(dir, fname)
-	file, err := os.OpenFile(fullFilename, os.O_CREATE, 0664)
+	file, err := os.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0777) // 0664)
 	if err != nil {
 		t.error("fileopen")
 		return
@@ -255,7 +256,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	defer file.Close()
 
 	zip.Flush()
-	_, err = file.Write(buff.Bytes())
+	_, err = buff.WriteTo(file)
 	if err != nil {
 		t.error("writepartial")
 		return
@@ -263,7 +264,6 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 
 	t.state.Set("streaming")
 
-	t.state.Set("readingsavedpackets")
 	// Continue reading packets until duration has elapsed.
 	for {
 		p, ok := t.readPacket(derivedCtx)
@@ -271,18 +271,19 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 			break
 		}
 		t.savePacket(w, p, headerLen)
-		zip.Flush()
-		_, err := file.Write(buff.Bytes())
-		if err != nil {
-			t.error("streaming")
-			return
+		if buff.Len() > 4096 {
+			zip.Flush()
+			_, err := buff.WriteTo(file)
+			if err != nil {
+				t.error("streaming")
+				return
+			}
 		}
 	}
-
 	zip.Close()
 
 	// buff now contains a complete .gz file, complete with footer.
-	_, err = file.Write(buff.Bytes())
+	_, err = buff.WriteTo(file)
 	if err != nil {
 		t.error("streaming")
 		return

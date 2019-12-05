@@ -164,7 +164,7 @@ func TestSaverWithUUID(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "savingfile", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -260,7 +260,7 @@ func TestSaverCantMkdir(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "mkdirerror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "mkdirerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -298,7 +298,7 @@ func TestSaverCantCreate(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "savingfile", "filewriteerror", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "fileopenerror", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
