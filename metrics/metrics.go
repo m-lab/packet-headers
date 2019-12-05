@@ -77,6 +77,18 @@ var (
 			Help: "How many UUIDs has the demuxer been told about. Should match pcap_saver_starts_total very closely",
 		},
 	)
+	DemuxerGarbageCollected = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "pcap_demuxer_garbage_collected_total",
+			Help: "How many flows have been garbage collected.",
+		},
+	)
+	DemuxerSaverCount = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "pcap_demuxer_current_savers",
+			Help: "How many savers does the demuxer know about right now",
+		},
+	)
 
 	BadEventsFromTCPInfo = promauto.NewCounterVec(
 		prometheus.CounterOpts{

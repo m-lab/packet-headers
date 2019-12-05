@@ -34,12 +34,24 @@ type TCP struct {
 	// saver.TCP objects are finalized.
 	currentFlows map[FlowKey]*saver.TCP
 	oldFlows     map[FlowKey]*saver.TCP
+	status       status
 
 	// Variables required for the construction of new Savers
 	maxDuration      time.Duration
 	uuidWaitDuration time.Duration
 	anon             anonymize.IPAnonymizer
 	dataDir          string
+}
+
+type status interface {
+	GC(stillPresent, discarded int)
+}
+
+type promStatus struct{}
+
+func (promStatus) GC(stillPresent, discarded int) {
+	metrics.DemuxerGarbageCollected.Add(float64(discarded))
+	metrics.DemuxerSaverCount.Set(float64(stillPresent))
 }
 
 // GetSaver returns a saver with channels for packets and a uuid.
@@ -100,6 +112,8 @@ func (d *TCP) collectGarbage() {
 			close(s.Pchan)
 		}
 	}(d.oldFlows)
+	// Record GC data.
+	d.status.GC(len(d.currentFlows), len(d.oldFlows))
 	// Advance the generation.
 	d.oldFlows = d.currentFlows
 	d.currentFlows = make(map[FlowKey]*saver.TCP)
