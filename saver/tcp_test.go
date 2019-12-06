@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -61,9 +62,12 @@ func TestAnonymizationWontCrashOnNil(t *testing.T) {
 type statusTracker struct {
 	status string
 	past   []string
+	mu     sync.Mutex
 }
 
 func (s *statusTracker) Set(state string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.status == state {
 		return
 	}
@@ -76,6 +80,8 @@ func (s *statusTracker) Done() {
 }
 
 func (s *statusTracker) Get() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	return s.status
 }
 

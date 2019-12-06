@@ -15,5 +15,5 @@ before_script:
 script:
 - go vet ./...
 - go build ./...
-- go test ./... -cover=1 -coverprofile=_c.cov
+- go test ./... -cover=1 -coverprofile=_c.cov -race
 - $GOPATH/bin/goveralls -service=travis-ci -coverprofile=_c.cov

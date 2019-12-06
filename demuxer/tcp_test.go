@@ -19,6 +19,10 @@ import (
 	"github.com/m-lab/packet-headers/saver"
 )
 
+func init() {
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+}
+
 type fakePacketSource struct {
 	packets []gopacket.Packet
 	c       chan gopacket.Packet
@@ -55,12 +59,35 @@ func TestTCPDryRun(t *testing.T) {
 	// Does not run forever or crash == success
 }
 
+type statusTracker struct {
+	stillPresent, discarded int
+	mu                      sync.Mutex
+}
+
+func (s *statusTracker) GC(stillPresent, discarded int) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.stillPresent = stillPresent
+	s.discarded = discarded
+}
+
+func (s *statusTracker) Get() statusTracker {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return statusTracker{
+		stillPresent: s.stillPresent,
+		discarded:    s.discarded,
+	}
+}
+
 func TestTCPWithRealPcaps(t *testing.T) {
 	dir, err := ioutil.TempDir("", "TestTCPWithRealPcaps")
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
 	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second)
+	st := &statusTracker{}
+	tcpdm.status = st
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -154,8 +181,9 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	// Lose all race conditions again.
 	time.Sleep(100 * time.Millisecond)
 	// Verify that one flow was garbage collected.
-	if len(tcpdm.oldFlows) != 1 || len(tcpdm.currentFlows) != 0 {
-		t.Errorf("Should have 1 old flow, not %d and 0 currentFlows not %d", len(tcpdm.oldFlows), len(tcpdm.currentFlows))
+	s := st.Get()
+	if s.stillPresent != 1 || s.discarded != 1 {
+		t.Errorf("Should have 1 flow left and 1 flow collected, not %d and %d", s.stillPresent, s.discarded)
 	}
 	gc <- time.Now()
 	time.Sleep(100 * time.Millisecond)
@@ -198,12 +226,12 @@ func TestTCPWithRealPcaps(t *testing.T) {
 
 	// After all that, also check that writes to an out-of-capacity Pchan will
 	// not block.
-	s := tcpdm.getSaver(ctx, flow1)
-	close(s.Pchan)
-	close(s.UUIDchan)
-	// This new channel assigned to s.Pchan will never be read, so if a blocking
+	sav := tcpdm.getSaver(ctx, flow1)
+	close(sav.Pchan)
+	close(sav.UUIDchan)
+	// This new channel assigned to sav.Pchan will never be read, so if a blocking
 	// write is performed then this goroutine will block.
-	s.Pchan = make(chan gopacket.Packet)
+	sav.Pchan = make(chan gopacket.Packet)
 	tcpdm.savePacket(ctx, flow1packets[0])
 	// If this doesn't block, then success!
 }
@@ -230,9 +258,9 @@ func TestUUIDWontBlock(t *testing.T) {
 
 	var wg sync.WaitGroup
 	wg.Add(1)
+	gcTimer := make(chan time.Time)
 	go func() {
 		pChan := make(chan gopacket.Packet)
-		gcTimer := make(chan time.Time)
 		tcpdm.CapturePackets(ctx, pChan, gcTimer)
 		// Does not run forever or crash == success
 		wg.Done()
@@ -240,9 +268,9 @@ func TestUUIDWontBlock(t *testing.T) {
 
 	// Write to the UUID channel 1000 times (more than exhausting its buffer)
 	for i := 0; i < 1000; i++ {
-		log.Println(i)
 		tcpdm.UUIDChan <- e
 	}
+	gcTimer <- time.Now()
 	// Lose all channel-read race conditions.
 	time.Sleep(100 * time.Millisecond)
 	// Ensure that reads of that channel never block. If the cancel() has an
