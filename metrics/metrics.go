@@ -80,7 +80,7 @@ var (
 	DemuxerGarbageCollected = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "pcap_demuxer_savers_garbage_collected_total",
-			Help: "How many flows have been garbage collected.",
+			Help: "How many savers have been garbage collected.",
 		},
 	)
 	DemuxerSaverCount = promauto.NewGauge(
