@@ -2,6 +2,7 @@ package saver
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -17,6 +18,7 @@ import (
 	"github.com/google/gopacket/pcap"
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/go/rtx"
+	"github.com/spf13/afero"
 )
 
 func init() {
@@ -308,6 +310,118 @@ func TestSaverCantCreate(t *testing.T) {
 	}
 }
 
+type limFile struct {
+	afero.File
+	numWritesRemaining int
+}
+
+func (lf *limFile) Write(s []byte) (int, error) {
+	if lf.numWritesRemaining > 0 {
+		lf.numWritesRemaining--
+		return lf.File.Write(s)
+	}
+
+	return 0, afero.ErrFileClosed
+}
+
+type limFs struct {
+	afero.Fs
+	writeLim int
+	openLim  int
+}
+
+func (fs *limFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if fs.openLim > 0 {
+		fs.openLim--
+		f, err := fs.Fs.OpenFile(name, flag, perm)
+		if err != nil {
+			return nil, err
+		}
+		lf := limFile{
+			File:               f,
+			numWritesRemaining: fs.writeLim,
+		}
+		return &lf, nil
+	}
+	return nil, afero.ErrFileNotFound // Not quite right, but ok for testing purposes.
+}
+
+func TestSaverCantStream(t *testing.T) {
+	tests := []struct {
+		name           string
+		lfs            afero.Fs
+		pcap           string
+		numWrites      int
+		expectedStates []string
+	}{
+		{
+			name:           "fail on file open",
+			lfs:            &limFs{afero.NewMemMapFs(), 0, 0},
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "fileopenerror", "discardingpackets"},
+		},
+		{
+			name:           "fail after uuid",
+			lfs:            &limFs{afero.NewMemMapFs(), 0, 1},
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "writepartialerror", "discardingpackets"},
+		},
+		{
+			name:           "fail after partial",
+			lfs:            &limFs{afero.NewMemMapFs(), 1, 1},
+			pcap:           "../testdata/v6.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
+		},
+		{
+			name:           "large, for coverage",
+			lfs:            &limFs{afero.NewMemMapFs(), 4, 1},
+			pcap:           "../testdata/large-ndt.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, err := afero.TempDir(tt.lfs, "", "TestSaverCantStream")
+			rtx.Must(err, "Could not create tempdir")
+			defer tt.lfs.RemoveAll(dir)
+
+			s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantStream", tt.lfs)
+			tracker := statusTracker{status: s.state.Get()}
+			s.state = &tracker
+
+			// Get the packet data ready to send.
+			h, err := pcap.OpenOffline(tt.pcap)
+			rtx.Must(err, fmt.Sprint("Could not open", tt.pcap))
+			ps := gopacket.NewPacketSource(h, h.LinkType())
+
+			s.UUIDchan <- UUIDEvent{"test/UUID", time.Now()}
+			packets := 0
+			for p := range ps.Packets() {
+				packets++
+				s.Pchan <- p
+			}
+			close(s.Pchan)
+			log.Println("Total of", packets, "packets")
+
+			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			defer cancel()
+			s.start(ctx, 50*time.Millisecond, 100*time.Millisecond)
+
+			expected := statusTracker{
+				status: "stopped",
+				past:   tt.expectedStates,
+			}
+			if !reflect.DeepEqual(&tracker, &expected) {
+				t.Errorf("%+v != %+v", &tracker, &expected)
+			}
+			if s.State() != "stopped" {
+				t.Errorf("%s != 'stopped'", s.State())
+			}
+		})
+	}
+
+}
+
 func TestSaverWithRealv4Data(t *testing.T) {
 	dir, err := ioutil.TempDir("", "TestSaverWithRealv4Data")
 	rtx.Must(err, "Could not create tempdir")
@@ -462,4 +576,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 		// If this doesn't crash, then the transport layer is not nil - success!
 		p.TransportLayer().TransportFlow().Endpoints()
 	}
+}
+
+func TestTCP_discardPackets(t *testing.T) {
 }

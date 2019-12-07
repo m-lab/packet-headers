@@ -11,11 +11,13 @@ import (
 	"sync"
 	"time"
 
-	"github.com/m-lab/go/anonymize"
+	"github.com/spf13/afero"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+
+	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/packet-headers/metrics"
 )
 
@@ -116,6 +118,7 @@ type TCP struct {
 	pchanRead    <-chan gopacket.Packet
 	uuidchanRead <-chan UUIDEvent
 
+	fs     afero.Fs
 	dir    string
 	cancel func()
 	state  statusSetter
@@ -237,7 +240,8 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Create a file and directory based on the UUID and the time.
 	t.state.Set("dircreation")
 	dir, fname := filename(t.dir, uuidEvent)
-	err := os.MkdirAll(dir, 0777)
+	log.Println("Create", dir)
+	err := t.fs.MkdirAll(dir, 0777)
 	if err != nil {
 		t.state.Set("mkdirerror")
 		log.Println("Could not create directory", dir, err)
@@ -248,19 +252,22 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Write first part of file.
 	t.state.Set("writepartial")
 	fullFilename := path.Join(dir, fname)
-	file, err := os.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0777) // 0664)
+	log.Println("Create", fname)
+	file, err := t.fs.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0664)
 	if err != nil {
 		t.error("fileopen")
 		return
 	}
 	defer file.Close()
 
+	bytes := int64(0)
 	zip.Flush()
-	_, err = buff.WriteTo(file)
+	n, err := buff.WriteTo(file)
 	if err != nil {
 		t.error("writepartial")
 		return
 	}
+	bytes += n
 
 	t.state.Set("streaming")
 
@@ -271,25 +278,27 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 			break
 		}
 		t.savePacket(w, p, headerLen)
-		if buff.Len() > 4096 {
-			zip.Flush()
-			_, err := buff.WriteTo(file)
+		zip.Flush()
+		if buff.Len() >= 4096 {
+			n, err := buff.WriteTo(file)
 			if err != nil {
 				t.error("streaming")
 				return
 			}
+			bytes += n
 		}
 	}
 	zip.Close()
 
 	// buff now contains a complete .gz file, complete with footer.
-	_, err = buff.WriteTo(file)
+	n, err = buff.WriteTo(file)
 	if err != nil {
 		t.error("streaming")
 		return
 	}
+	bytes += n
 
-	log.Println("Successfully wrote", fullFilename, "for flow", t.id)
+	log.Println("Successfully wrote", bytes, "bytes to", fullFilename, "for flow", t.id)
 }
 
 // discardPackets keeps the packet channel empty by throwing away all incoming
@@ -344,7 +353,11 @@ func (t *TCP) State() string {
 
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
-func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
+func newTCP(dir string, anon anonymize.IPAnonymizer, id string, ext ...afero.Fs) *TCP {
+	fs := osfs
+	if len(ext) > 0 {
+		fs = ext[0]
+	}
 	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
 	// 10Gbps:
 	//
@@ -371,12 +384,15 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
 		UUIDchan:     uuidchan,
 		uuidchanRead: uuidchan,
 
+		fs:    fs,
 		dir:   dir,
 		state: newStatus("notstarted"),
 		anon:  anon,
 		id:    id,
 	}
 }
+
+var osfs = afero.NewOsFs()
 
 // StartNew creates a new saver.TCP to save a single TCP flow and starts its
 // goroutine. The goroutine can be stopped either by cancelling the passed-in
@@ -387,7 +403,7 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
 // It is the caller's responsibility to close Pchan or cancel the context.
 // uuidDelay must be smaller than maxDuration.
 func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string) *TCP {
-	s := newTCP(dir, anon, id)
+	s := newTCP(dir, anon, id, osfs)
 	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }
