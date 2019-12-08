@@ -176,68 +176,6 @@ func TestSaverWithUUID(t *testing.T) {
 	}
 }
 
-func TestSaverNoUUID(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverNoUUID")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-	for p := range ps.Packets() {
-		s.Pchan <- p
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	s.start(ctx, 5*time.Second, 10*time.Second)
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuiderror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
-}
-
-func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverNoUUIDClosedUUIDChan")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverNoUUIDClosedUUIDChan")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-	for p := range ps.Packets() {
-		s.Pchan <- p
-	}
-	close(s.Pchan)
-	close(s.UUIDchan)
-
-	s.start(context.Background(), 5*time.Second, 10*time.Second)
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanerror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
-}
-
 type limFile struct {
 	afero.File
 	numWritesRemaining int
@@ -292,6 +230,20 @@ func TestSaverVariousErrors(t *testing.T) {
 		expectedStates []string
 	}{
 		{
+			name: "fail no uuid, open channel",
+			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
+			uuid: "", closeUUID: false,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuiderror", "discardingpackets"},
+		},
+		{
+			name: "fail no uuid, closed channel",
+			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
+			uuid: "", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanerror", "discardingpackets"},
+		},
+		{
 			name: "fail on mkdir",
 			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
 			uuid: "testUUID", closeUUID: true,
@@ -329,7 +281,7 @@ func TestSaverVariousErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dir, err := afero.TempDir(tt.lfs, "", "TestSaverCantStream")
+			dir, err := afero.TempDir(tt.lfs, "", "TestSaver")
 			rtx.Must(err, "Could not create tempdir")
 			defer tt.lfs.RemoveAll(dir)
 
@@ -355,9 +307,9 @@ func TestSaverVariousErrors(t *testing.T) {
 				close(s.UUIDchan)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
-			s.start(ctx, 50*time.Millisecond, 100*time.Millisecond)
+			s.start(ctx, 20*time.Millisecond, 80*time.Millisecond)
 
 			expected := statusTracker{
 				status: "stopped",
