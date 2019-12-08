@@ -238,78 +238,6 @@ func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
 	}
 }
 
-func TestSaverCantMkdir(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverCantMkdir")
-	rtx.Must(err, "Could not create tempdir")
-	rtx.Must(os.Chmod(dir, 0111), "Could not chmod dir to unwriteable")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantMkdir")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
-
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-	for p := range ps.Packets() {
-		s.Pchan <- p
-	}
-	close(s.Pchan)
-
-	s.start(context.Background(), 5*time.Second, 10*time.Second)
-
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "mkdirerror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
-}
-
-func TestSaverCantCreate(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverCantCreate")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantCreate")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	// Get the packet data ready to send.
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-
-	// A UUID containing a non-shell-safe character will never happen in
-	// practice, but it does cause the resulting file to fail in os.Create()
-	s.UUIDchan <- UUIDEvent{"test/UUID", time.Now()}
-	for p := range ps.Packets() {
-		s.Pchan <- p
-	}
-	close(s.Pchan)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	s.start(ctx, 50*time.Millisecond, 100*time.Millisecond)
-
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "fileopenerror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
-}
-
 type limFile struct {
 	afero.File
 	numWritesRemaining int
@@ -326,55 +254,75 @@ func (lf *limFile) Write(s []byte) (int, error) {
 
 type limFs struct {
 	afero.Fs
-	writeLim int
-	openLim  int
+	mkdirOutcome error
+	openOutcome  error
+	writeLim     int
+}
+
+func (fs *limFs) MkdirAll(name string, perm os.FileMode) error {
+	if fs.mkdirOutcome != nil {
+		return fs.mkdirOutcome
+	}
+	return fs.Fs.MkdirAll(name, perm)
 }
 
 func (fs *limFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
-	if fs.openLim > 0 {
-		fs.openLim--
-		f, err := fs.Fs.OpenFile(name, flag, perm)
-		if err != nil {
-			return nil, err
-		}
-		lf := limFile{
-			File:               f,
-			numWritesRemaining: fs.writeLim,
-		}
-		return &lf, nil
+	if fs.openOutcome != nil {
+		return nil, fs.openOutcome
 	}
-	return nil, afero.ErrFileNotFound // Not quite right, but ok for testing purposes.
+
+	f, err := fs.Fs.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, err
+	}
+	lf := limFile{
+		File:               f,
+		numWritesRemaining: fs.writeLim,
+	}
+	return &lf, nil
 }
 
-func TestSaverCantStream(t *testing.T) {
+func TestSaverVariousErrors(t *testing.T) {
 	tests := []struct {
 		name           string
 		lfs            afero.Fs
+		uuid           string
+		closeUUID      bool
 		pcap           string
-		numWrites      int
 		expectedStates []string
 	}{
 		{
-			name:           "fail on file open",
-			lfs:            &limFs{afero.NewMemMapFs(), 0, 0},
+			name: "fail on mkdir",
+			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "mkdirerror", "discardingpackets"},
+		},
+		{
+			name: "fail on file open",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, os.ErrPermission, 0},
+			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "fileopenerror", "discardingpackets"},
 		},
 		{
-			name:           "fail after uuid",
-			lfs:            &limFs{afero.NewMemMapFs(), 0, 1},
+			name: "fail after uuid",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 0},
+			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "writepartialerror", "discardingpackets"},
 		},
 		{
-			name:           "fail after partial",
-			lfs:            &limFs{afero.NewMemMapFs(), 1, 1},
+			name: "fail after partial",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 1},
+			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v6.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
 		},
 		{
-			name:           "large, for coverage",
-			lfs:            &limFs{afero.NewMemMapFs(), 4, 1},
+			name: "large, for coverage",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 4},
+			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/large-ndt.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
 		},
@@ -394,14 +342,18 @@ func TestSaverCantStream(t *testing.T) {
 			rtx.Must(err, fmt.Sprint("Could not open", tt.pcap))
 			ps := gopacket.NewPacketSource(h, h.LinkType())
 
-			s.UUIDchan <- UUIDEvent{"test/UUID", time.Now()}
+			if len(tt.uuid) > 0 {
+				s.UUIDchan <- UUIDEvent{"test/UUID", time.Now()}
+			}
 			packets := 0
 			for p := range ps.Packets() {
 				packets++
 				s.Pchan <- p
 			}
-			close(s.Pchan)
 			log.Println("Total of", packets, "packets")
+			if tt.closeUUID {
+				close(s.UUIDchan)
+			}
 
 			ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 			defer cancel()
@@ -576,7 +528,4 @@ func TestSaverWithRealv6Data(t *testing.T) {
 		// If this doesn't crash, then the transport layer is not nil - success!
 		p.TransportLayer().TransportFlow().Endpoints()
 	}
-}
-
-func TestTCP_discardPackets(t *testing.T) {
 }
