@@ -244,14 +244,14 @@ func TestSaverVariousErrors(t *testing.T) {
 			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
 			uuid: "", closeUUID: false,
 			pcap:           "../testdata/v4.pcap",
-			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuiderror", "discardingpackets"},
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidtimedouterror", "discardingpackets"},
 		},
 		{
 			name: "fail no uuid, closed channel",
 			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
 			uuid: "", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
-			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanerror", "discardingpackets"},
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanclosederror", "discardingpackets"},
 		},
 		{
 			name: "fail on mkdir",

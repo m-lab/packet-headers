@@ -190,11 +190,6 @@ func (t *TCP) start(ctx context.Context, uuidDelay, duration time.Duration) {
 // resulting pcap file in RAM. Once the passed-in duration has passed, it writes
 // the resulting file to disk.
 func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration) {
-	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
-	defer uuidCancel()
-	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
-	defer derivedCancel()
-
 	pw := newPrebufferedWriter()
 
 	zip := gzip.NewWriter(&pw)
@@ -203,8 +198,11 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	w := pcapgo.NewWriterNanos(zip)
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingcandidatepackets")
+
+	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
+	defer uuidCancel()
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
-	p, ok := t.readPacket(derivedCtx)
+	p, ok := t.readPacket(uuidCtx)
 	if !ok {
 		// This error should never occur in production. It indicates a
 		// configuration error or a bug in packet-headers.
@@ -251,31 +249,32 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// infrequently that the flow gets garbage-collected between packet
 	// arrivals.
 	var uuidEvent UUIDEvent
-WAITING:
-	for {
+	for uuidCtx.Err() == nil {
 		select {
-		// This case should only be tested until channel is closed or event is received.
+		// If the context expires, no need to keep capturing.
+		case <-uuidCtx.Done():
+			log.Println("Context expired waiting for UUID for flow", t.id)
+			t.error("uuidtimedout")
+			return
+
+		// Any packets should be written to the buffer.
+		case p, ok := <-t.pchanRead:
+			if ok {
+				t.savePacket(w, p, headerLen)
+			}
+
+		// Note: if packet channel gets backed up, select algorithm may drain more packets after UUID arrives.
 		case uuidEvent, ok = <-t.uuidchanRead:
 			if !ok {
+				// If the channel is closed, then we can never get the uuid, so stop capturing.
 				log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
-				t.error("uuidchan")
+				t.error("uuidchanclosed")
 				return
 			}
+			// Once the uuid event is received we cancel the context and exit the loop.
 			t.state.Set("uuidfound")
-			break WAITING
-		default:
-			p, ok := t.readPacket(uuidCtx)
-			if !ok {
-				break WAITING
-			}
-			t.savePacket(w, p, headerLen)
+			uuidCancel() // Exit the loop
 		}
-	}
-
-	if len(uuidEvent.UUID) == 0 {
-		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID for flow", t.id)
-		t.error("uuid")
-		return
 	}
 
 	// uuidEvent is now set to a good value.
@@ -309,6 +308,9 @@ WAITING:
 	}
 
 	t.state.Set("streaming")
+
+	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
+	defer derivedCancel()
 
 	// Continue reading packets until duration has elapsed.
 	for {
