@@ -86,7 +86,8 @@ func TestSaverDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverDryRun")
+	// For this one, use the real filesystem, even though we don't do anything but create a directory.
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverDryRun", nil)
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -119,11 +120,12 @@ func TestSaverDryRun(t *testing.T) {
 }
 
 func TestSaverWithUUID(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverWithUUID")
+	fs := afero.NewMemMapFs()
+	dir, err := afero.TempDir(fs, "", "TestSaverWithUUID")
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverWithUUID")
+	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverWithUUID", fs)
 	tracker := statusTracker{status: s.state.Get()}
 	s.state = &tracker
 
@@ -177,10 +179,11 @@ type limFile struct {
 
 func (lf *limFile) Write(s []byte) (int, error) {
 	if lf.numWritesRemaining > 0 {
+		log.Println("Writing", len(s))
 		lf.numWritesRemaining--
 		return lf.File.Write(s)
 	}
-
+	log.Println("failing write")
 	return 0, afero.ErrFileClosed
 }
 
