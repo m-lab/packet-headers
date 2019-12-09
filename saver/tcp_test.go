@@ -108,7 +108,7 @@ func TestSaverDryRun(t *testing.T) {
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 
 	// Send a UUID but never send any packets.
-	s.UUIDchan <- saver.UUIDEvent{"testUUID", tstamp}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
@@ -154,7 +154,7 @@ func TestSaverWithUUID(t *testing.T) {
 		s.Pchan <- packets[i]
 	}
 	// Send a UUID.
-	s.UUIDchan <- saver.UUIDEvent{"testUUID", time.Now()}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: time.Now()}
 
 	// Run saver in background.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
@@ -307,7 +307,7 @@ func TestSaverVariousErrors(t *testing.T) {
 			ps := gopacket.NewPacketSource(h, h.LinkType())
 
 			if len(tt.uuid) > 0 {
-				s.UUIDchan <- saver.UUIDEvent{"test/UUID", time.Now()}
+				s.UUIDchan <- saver.UUIDEvent{UUID: "test/UUID", Timestamp: time.Now()}
 			}
 			packets := 0
 			for p := range ps.Packets() {
@@ -350,7 +350,7 @@ func TestSaverWithRealv4Data(t *testing.T) {
 	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv4Data")
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
-	s.UUIDchan <- saver.UUIDEvent{"testUUID", tstamp}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
@@ -427,7 +427,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv6Data")
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
-	s.UUIDchan <- saver.UUIDEvent{"testUUID", tstamp}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
