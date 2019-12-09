@@ -5,7 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"errors"
+	"io"
 	"log"
 	"os"
 	"path"
@@ -20,11 +20,6 @@ import (
 
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/packet-headers/metrics"
-)
-
-var (
-	// ErrNilFilesystem is returned when fs parameter is nil
-	ErrNilFilesystem = errors.New("fs must not be nil")
 )
 
 // A nice example of why go generics might be nice sometimes.
@@ -61,6 +56,46 @@ func anonymizePacket(a anonymize.IPAnonymizer, p gopacket.Packet) {
 			c[i] = 0
 		}
 	}
+}
+
+// prebufferWriter writes to a bytes.Buffer, until redirect() is called, then writes to the provided Writer.
+type prebufferedWriter struct {
+	io.Writer
+
+	lock   sync.Mutex
+	buf    *bytes.Buffer
+	writer io.Writer
+}
+
+func newPrebufferedWriter() prebufferedWriter {
+	// Start with modest buffer that might be adequate.
+	return prebufferedWriter{buf: bytes.NewBuffer(make([]byte, 0, 8192))}
+}
+
+func (pw *prebufferedWriter) Redirect(w io.Writer) (int64, error) {
+	pw.lock.Lock()
+	defer pw.lock.Unlock()
+
+	if w == nil {
+		return 0, os.ErrInvalid
+	}
+	n, err := pw.buf.WriteTo(w)
+	if err != nil {
+		return 0, err
+	}
+	pw.buf = nil
+	pw.writer = w
+
+	return n, nil
+}
+
+func (pw *prebufferedWriter) Write(p []byte) (int, error) {
+	if pw.writer != nil {
+		n, err := pw.writer.Write(p)
+		return n, err
+	}
+	n, err := pw.buf.Write(p)
+	return n, err
 }
 
 // UUIDEvent is passed to the saver along with an event arrival timestamp so
@@ -160,8 +195,9 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
 
-	buff := &bytes.Buffer{}
-	zip := gzip.NewWriter(buff)
+	pw := newPrebufferedWriter()
+
+	zip := gzip.NewWriter(&pw)
 
 	// Write PCAP data to the buffer.
 	w := pcapgo.NewWriterNanos(zip)
@@ -255,7 +291,7 @@ WAITING:
 		return
 	}
 
-	// Write first part of file.
+	// Switch to file output mode, and write first part of file.
 	t.state.Set("writepartial")
 	fullFilename := path.Join(dir, fname)
 	log.Println("Create", fname)
@@ -266,14 +302,11 @@ WAITING:
 	}
 	defer file.Close()
 
-	bytes := int64(0)
-	zip.Flush()
-	n, err := buff.WriteTo(file)
+	_, err = pw.Redirect(file)
 	if err != nil {
 		t.error("writepartial")
 		return
 	}
-	bytes += n
 
 	t.state.Set("streaming")
 
@@ -284,31 +317,16 @@ WAITING:
 			break
 		}
 		t.savePacket(w, p, headerLen)
-		// Unfoertunately have to flush to determine whether to write to file.
-		// 4096 is a typical file sector size, though the actual size matters very little,
-		// as the file system will typically buffer these anyway.
-		// Without this, it is difficult to test the inner error condition.
-		zip.Flush()
-		if buff.Len() >= 4096 {
-			n, err := buff.WriteTo(file)
-			if err != nil {
-				t.error("streaming")
-				return
-			}
-			bytes += n
-		}
 	}
-	zip.Close()
 
-	// buff now contains a complete .gz file, complete with footer.
-	n, err = buff.WriteTo(file)
+	err = zip.Close()
 	if err != nil {
 		t.error("streaming")
 		return
 	}
-	bytes += n
 
-	log.Println("Successfully wrote", bytes, "bytes to", fullFilename, "for flow", t.id)
+	// File will be closed at end of function.
+	log.Println("Successfully wrote", fullFilename, "for flow", t.id)
 }
 
 // discardPackets keeps the packet channel empty by throwing away all incoming
