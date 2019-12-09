@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"log"
 	"os"
 	"path"
@@ -19,6 +20,11 @@ import (
 
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/packet-headers/metrics"
+)
+
+var (
+	// ErrNilFilesystem is returned when fs parameter is nil
+	ErrNilFilesystem = errors.New("fs must not be nil")
 )
 
 // A nice example of why go generics might be nice sometimes.
@@ -209,9 +215,10 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// infrequently that the flow gets garbage-collected between packet
 	// arrivals.
 	var uuidEvent UUIDEvent
-	doneWaiting := false
-	for !doneWaiting {
+WAITING:
+	for {
 		select {
+		// This case should only be tested until channel is closed or event is received.
 		case uuidEvent, ok = <-t.uuidchanRead:
 			if !ok {
 				log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
@@ -219,14 +226,13 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 				return
 			}
 			t.state.Set("uuidfound")
-			doneWaiting = true
+			break WAITING
 		default:
 			p, ok := t.readPacket(uuidCtx)
-			if ok {
-				t.savePacket(w, p, headerLen)
-			} else {
-				doneWaiting = true
+			if !ok {
+				break WAITING
 			}
+			t.savePacket(w, p, headerLen)
 		}
 	}
 
@@ -278,6 +284,10 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 			break
 		}
 		t.savePacket(w, p, headerLen)
+		// Unfoertunately have to flush to determine whether to write to file.
+		// 4096 is a typical file sector size, though the actual size matters very little,
+		// as the file system will typically buffer these anyway.
+		// Without this, it is difficult to test the inner error condition.
 		zip.Flush()
 		if buff.Len() >= 4096 {
 			n, err := buff.WriteTo(file)
@@ -353,10 +363,9 @@ func (t *TCP) State() string {
 
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
-func newTCP(dir string, anon anonymize.IPAnonymizer, id string, ext ...afero.Fs) *TCP {
-	fs := osfs
-	if len(ext) > 0 {
-		fs = ext[0]
+func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs) *TCP {
+	if fs == nil {
+		fs = afero.NewOsFs()
 	}
 	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
 	// 10Gbps:
@@ -392,8 +401,6 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string, ext ...afero.Fs)
 	}
 }
 
-var osfs = afero.NewOsFs()
-
 // StartNew creates a new saver.TCP to save a single TCP flow and starts its
 // goroutine. The goroutine can be stopped either by cancelling the passed-in
 // context or by closing the Pchan channel. Closing Pchan is the preferred
@@ -403,7 +410,7 @@ var osfs = afero.NewOsFs()
 // It is the caller's responsibility to close Pchan or cancel the context.
 // uuidDelay must be smaller than maxDuration.
 func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string) *TCP {
-	s := newTCP(dir, anon, id, osfs)
+	s := newTCP(dir, anon, id, afero.NewOsFs())
 	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }
