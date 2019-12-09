@@ -3,6 +3,7 @@ package demuxer
 
 import (
 	"context"
+	"runtime/debug"
 	"time"
 
 	"github.com/google/gopacket"
@@ -112,6 +113,8 @@ func (d *TCP) collectGarbage() {
 			close(s.UUIDchan)
 			close(s.Pchan)
 		}
+		// Tell the VM to try and return RAM to the OS.
+		debug.FreeOSMemory()
 	}(d.oldFlows)
 	// Record GC data.
 	d.status.GC(len(d.currentFlows), len(d.oldFlows))
