@@ -103,7 +103,7 @@ func TestSaverDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create tempdir")
 
 	tracker := statusTracker{status: "notstarted"}
-	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverDryRun", fs, &tracker)
+	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverDryRun", fs, &tracker, true)
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 
@@ -141,7 +141,7 @@ func TestSaverWithUUID(t *testing.T) {
 
 	tracker := statusTracker{status: "notstarted"}
 	fs := afero.NewOsFs()
-	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverWithUUID", fs, &tracker)
+	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverWithUUID", fs, &tracker, true)
 
 	h, err := pcap.OpenOffline("../testdata/v4.pcap")
 	rtx.Must(err, "Could not open v4.pcap")
@@ -239,6 +239,7 @@ func TestSaverVariousErrors(t *testing.T) {
 		closeUUID      bool
 		pcap           string
 		expectedStates []string
+		stream         bool
 	}{
 		{
 			name: "fail no uuid, open channel",
@@ -246,6 +247,7 @@ func TestSaverVariousErrors(t *testing.T) {
 			uuid: "", closeUUID: false,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidtimedouterror", "discardingpackets"},
+			stream:         true,
 		},
 		{
 			name: "fail no uuid, closed channel",
@@ -253,6 +255,7 @@ func TestSaverVariousErrors(t *testing.T) {
 			uuid: "", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanclosederror", "discardingpackets"},
+			stream:         true,
 		},
 		{
 			name: "fail on mkdir",
@@ -260,13 +263,23 @@ func TestSaverVariousErrors(t *testing.T) {
 			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "mkdirerror", "discardingpackets"},
+			stream:         true,
 		},
 		{
-			name: "fail on file open",
+			name: "fail on file open (with streaming)",
 			lfs:  &limFs{afero.NewMemMapFs(), nil, os.ErrPermission, 0},
 			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "fileopenerror", "discardingpackets"},
+			stream:         true,
+		},
+		{
+			name: "fail on file open (no streaming)",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, os.ErrPermission, 0},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writefinal", "fileopenerror", "discardingpackets"},
+			stream:         false,
 		},
 		{
 			name: "fail after uuid",
@@ -274,13 +287,23 @@ func TestSaverVariousErrors(t *testing.T) {
 			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v4.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "writepartialerror", "discardingpackets"},
+			stream:         true,
 		},
 		{
-			name: "fail after partial",
+			name: "fail after partial (streaming)",
 			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 1},
 			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/v6.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
+			stream:         true,
+		},
+		{
+			name: "fail after partial (no streaming)",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 0},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v6.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writefinal", "writefinalerror", "discardingpackets"},
+			stream:         false,
 		},
 		{
 			// This large file currently results in about 50 to 60 writes, but we only allow 5 writes to succeed.
@@ -291,6 +314,7 @@ func TestSaverVariousErrors(t *testing.T) {
 			uuid: "testUUID", closeUUID: true,
 			pcap:           "../testdata/large-ndt.pcap",
 			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
+			stream:         true,
 		},
 	}
 	for _, tt := range tests {
@@ -299,7 +323,7 @@ func TestSaverVariousErrors(t *testing.T) {
 			rtx.Must(err, "Could not create tempdir")
 
 			tracker := statusTracker{status: "notstarted"}
-			s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverCantStream", tt.lfs, &tracker)
+			s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverCantStream", tt.lfs, &tracker, tt.stream)
 
 			// Get the packet data ready to send.
 			h, err := pcap.OpenOffline(tt.pcap)
@@ -347,7 +371,7 @@ func TestSaverWithRealv4Data(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv4Data")
+	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv4Data", true)
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
@@ -424,7 +448,7 @@ func TestSaverWithRealv6Data(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv6Data")
+	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv6Data", false)
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}

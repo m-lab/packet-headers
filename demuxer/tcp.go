@@ -41,6 +41,7 @@ type TCP struct {
 	uuidWaitDuration time.Duration
 	anon             anonymize.IPAnonymizer
 	dataDir          string
+	stream           bool
 }
 
 type status interface {
@@ -65,7 +66,7 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 		if ok {
 			delete(d.oldFlows, flow)
 		} else {
-			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon))
+			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
 		}
 		d.currentFlows[flow] = t
 	}
@@ -155,7 +156,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, stream bool) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
@@ -169,5 +170,6 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 		dataDir:          dataDir,
 		maxDuration:      maxFlowDuration,
 		uuidWaitDuration: uuidWaitDuration,
+		stream:           stream,
 	}
 }
