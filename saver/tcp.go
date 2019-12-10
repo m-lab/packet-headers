@@ -162,6 +162,7 @@ type TCP struct {
 	cancel func()
 	state  statusSetter
 	anon   anonymize.IPAnonymizer
+	stream bool
 
 	id string
 
@@ -288,24 +289,25 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		return
 	}
 
-	// Switch to file output mode, and write first part of file.
-	t.state.Set("writepartial")
 	fullFilename := path.Join(dir, fname)
-	log.Println("Create", fname)
-	file, err := t.fs.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0664)
-	if err != nil {
-		t.error("fileopen")
-		return
-	}
-	defer warnonerror.Close(file, fmt.Sprint("Could not close", file.Name()))
+	if t.stream {
+		// Switch to file output mode, and write first part of file.
+		t.state.Set("writepartial")
+		file, err := t.fs.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0664)
+		if err != nil {
+			t.error("fileopen")
+			return
+		}
+		defer warnonerror.Close(file, fmt.Sprint("Could not close", file.Name()))
 
-	err = pw.Redirect(file)
-	if err != nil {
-		t.error("writepartial")
-		return
-	}
+		err = pw.Redirect(file)
+		if err != nil {
+			t.error("writepartial")
+			return
+		}
 
-	t.state.Set("streaming")
+		t.state.Set("streaming")
+	}
 
 	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
 	defer derivedCancel()
@@ -323,6 +325,23 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	if err != nil {
 		t.error("streaming")
 		return
+	}
+
+	if !t.stream {
+		// Switch to file output mode, and write first part of file.
+		t.state.Set("writefinal")
+		file, err := t.fs.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0664)
+		if err != nil {
+			t.error("fileopen")
+			return
+		}
+		defer warnonerror.Close(file, fmt.Sprint("Could not close", file.Name()))
+
+		err = pw.Redirect(file)
+		if err != nil {
+			t.error("writefinal")
+			return
+		}
 	}
 
 	// File will be closed at end of function.
@@ -382,7 +401,7 @@ func (t *TCP) State() string {
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
 // fs MUST be non-null.
-func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs) *TCP {
+func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs, stream bool) *TCP {
 	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
 	// 10Gbps:
 	//
@@ -409,11 +428,12 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs) *TC
 		UUIDchan:     uuidchan,
 		uuidchanRead: uuidchan,
 
-		fs:    fs,
-		dir:   dir,
-		state: newStatus("notstarted"),
-		anon:  anon,
-		id:    id,
+		fs:     fs,
+		dir:    dir,
+		state:  newStatus("notstarted"),
+		anon:   anon,
+		id:     id,
+		stream: stream,
 	}
 }
 
@@ -425,8 +445,8 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs) *TC
 //
 // It is the caller's responsibility to close Pchan or cancel the context.
 // uuidDelay must be smaller than maxDuration.
-func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string) *TCP {
-	s := newTCP(dir, anon, id, afero.NewOsFs())
+func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string, stream bool) *TCP {
+	s := newTCP(dir, anon, id, afero.NewOsFs(), stream)
 	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }

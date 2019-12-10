@@ -15,8 +15,8 @@ var (
 	AnonymizePacket      = anonymizePacket
 )
 
-func NewTCPWithTrackerForTest(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs, ss statusSetter) *TCP {
-	tcp := newTCP(dir, anon, id, fs)
+func NewTCPWithTrackerForTest(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs, ss statusSetter, stream bool) *TCP {
+	tcp := newTCP(dir, anon, id, fs, stream)
 	tcp.state = ss
 	return tcp
 }
