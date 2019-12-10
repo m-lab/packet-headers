@@ -296,7 +296,6 @@ func TestSaverVariousErrors(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			dir, err := afero.TempDir(tt.lfs, "", "TestSaver")
 			rtx.Must(err, "Could not create tempdir")
-			defer tt.lfs.RemoveAll(dir)
 
 			tracker := statusTracker{status: "notstarted"}
 			s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverCantStream", tt.lfs, &tracker)
@@ -339,9 +338,9 @@ func TestSaverVariousErrors(t *testing.T) {
 }
 
 func TestSaverWithRealv4Data(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverWithRealv4Data")
+	fs := afero.NewMemMapFs()
+	dir, err := afero.TempDir(fs, "", "TestSaverWithRealv4Data")
 	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
 
 	// Send a UUID and then some packets.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -416,9 +415,9 @@ func TestSaverWithRealv4Data(t *testing.T) {
 }
 
 func TestSaverWithRealv6Data(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverWithRealv6Data")
+	fs := afero.NewMemMapFs()
+	dir, err := afero.TempDir(fs, "", "TestSaverWithRealv6Data")
 	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
 
 	// Send a UUID and then some packets.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
