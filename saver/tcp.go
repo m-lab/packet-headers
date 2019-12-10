@@ -5,18 +5,23 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
-	"io/ioutil"
+	"fmt"
+	"io"
 	"log"
 	"os"
 	"path"
 	"sync"
 	"time"
 
-	"github.com/m-lab/go/anonymize"
+	"github.com/m-lab/go/warnonerror"
+
+	"github.com/spf13/afero"
 
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcapgo"
+
+	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/packet-headers/metrics"
 )
 
@@ -54,6 +59,41 @@ func anonymizePacket(a anonymize.IPAnonymizer, p gopacket.Packet) {
 			c[i] = 0
 		}
 	}
+}
+
+// prebufferWriter writes to a bytes.Buffer, until redirect() is called, then writes to the provided Writer.
+// NOT THREAD SAFE.
+type prebufferedWriter struct {
+	buf    *bytes.Buffer
+	writer io.Writer
+}
+
+func newPrebufferedWriter() prebufferedWriter {
+	// Start with modest buffer that might be adequate.
+	return prebufferedWriter{buf: bytes.NewBuffer(make([]byte, 0, 8192))}
+}
+
+func (pw *prebufferedWriter) Redirect(w io.Writer) error {
+	if w == nil {
+		return os.ErrInvalid
+	}
+	_, err := pw.buf.WriteTo(w)
+	if err != nil {
+		return err
+	}
+	pw.buf = nil
+	pw.writer = w
+
+	return nil
+}
+
+func (pw *prebufferedWriter) Write(p []byte) (int, error) {
+	if pw.writer != nil {
+		n, err := pw.writer.Write(p)
+		return n, err
+	}
+	n, err := pw.buf.Write(p)
+	return n, err
 }
 
 // UUIDEvent is passed to the saver along with an event arrival timestamp so
@@ -117,6 +157,7 @@ type TCP struct {
 	pchanRead    <-chan gopacket.Packet
 	uuidchanRead <-chan UUIDEvent
 
+	fs     afero.Fs
 	dir    string
 	cancel func()
 	state  statusSetter
@@ -147,20 +188,19 @@ func (t *TCP) start(ctx context.Context, uuidDelay, duration time.Duration) {
 // resulting pcap file in RAM. Once the passed-in duration has passed, it writes
 // the resulting file to disk.
 func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration) {
-	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
-	defer uuidCancel()
-	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
-	defer derivedCancel()
+	pw := newPrebufferedWriter()
 
-	buff := &bytes.Buffer{}
-	zip := gzip.NewWriter(buff)
+	zip := gzip.NewWriter(&pw)
 
 	// Write PCAP data to the buffer.
 	w := pcapgo.NewWriterNanos(zip)
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingcandidatepackets")
+
+	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
+	defer uuidCancel()
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
-	p, ok := t.readPacket(derivedCtx)
+	p, ok := t.readPacket(uuidCtx)
 	if !ok {
 		// This error should never occur in production. It indicates a
 		// configuration error or a bug in packet-headers.
@@ -197,18 +237,8 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
 	t.savePacket(w, p, headerLen)
 
-	// Read packets for the first uuid wait duration seconds.
-	for {
-		p, ok := t.readPacket(uuidCtx)
-		if !ok {
-			break
-		}
-		t.savePacket(w, p, headerLen)
-	}
-
-	// Read the UUID to determine the filename
 	t.state.Set("uuidwait")
-	var uuidEvent UUIDEvent
+	// Read packets while waiting for uuid event, or uuidCtx expires..
 	// The error conditions below are expected to occur in production. In
 	// particular, every flow that existed prior to the start of the start of
 	// the packet-headers binary will cause this error at least once.
@@ -216,21 +246,70 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// This error will also occur for long-lived flows that send packets so
 	// infrequently that the flow gets garbage-collected between packet
 	// arrivals.
-	select {
-	case uuidEvent, ok = <-t.uuidchanRead:
-		if !ok {
-			log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
-			t.error("uuidchan")
+	var uuidEvent UUIDEvent
+	for uuidCtx.Err() == nil {
+		select {
+		// If the context expires, no need to keep capturing.
+		case <-uuidCtx.Done():
+			log.Println("Context expired waiting for UUID for flow", t.id)
+			t.error("uuidtimedout")
 			return
+
+		// Any packets should be written to the buffer.
+		case p, ok := <-t.pchanRead:
+			if ok {
+				t.savePacket(w, p, headerLen)
+			}
+
+		// Note: if packet channel gets backed up, select algorithm may drain more packets after UUID arrives.
+		case uuidEvent, ok = <-t.uuidchanRead:
+			if !ok {
+				// If the channel is closed, then we can never get the uuid, so stop capturing.
+				log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
+				t.error("uuidchanclosed")
+				return
+			}
+			// Once the uuid event is received we cancel the context and exit the loop.
+			t.state.Set("uuidfound")
+			uuidCancel() // Exit the loop
 		}
-	default:
-		log.Println("UUID did not arrive; PCAP capture cancelled with no UUID for flow", t.id)
-		t.error("uuid")
+	}
+
+	// uuidEvent is now set to a good value.
+	// Create a file and directory based on the UUID and the time.
+	t.state.Set("dircreation")
+	dir, fname := filename(t.dir, uuidEvent)
+	log.Println("Create", dir)
+	err := t.fs.MkdirAll(dir, 0777)
+	if err != nil {
+		t.state.Set("mkdirerror")
+		log.Println("Could not create directory", dir, err)
+		t.error("mkdir")
 		return
 	}
-	// uuidEvent is now set to a good value.
 
-	t.state.Set("readingsavedpackets")
+	// Switch to file output mode, and write first part of file.
+	t.state.Set("writepartial")
+	fullFilename := path.Join(dir, fname)
+	log.Println("Create", fname)
+	file, err := t.fs.OpenFile(fullFilename, os.O_WRONLY|os.O_CREATE, 0664)
+	if err != nil {
+		t.error("fileopen")
+		return
+	}
+	defer warnonerror.Close(file, fmt.Sprint("Could not close", file.Name()))
+
+	err = pw.Redirect(file)
+	if err != nil {
+		t.error("writepartial")
+		return
+	}
+
+	t.state.Set("streaming")
+
+	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
+	defer derivedCancel()
+
 	// Continue reading packets until duration has elapsed.
 	for {
 		p, ok := t.readPacket(derivedCtx)
@@ -239,26 +318,14 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		}
 		t.savePacket(w, p, headerLen)
 	}
-	zip.Close()
-	// buff now contains a complete .gz file, complete with footer.
 
-	// Create a file and directory based on the UUID and the time.
-	t.state.Set("dircreation")
-	dir, fname := filename(t.dir, uuidEvent)
-	err := os.MkdirAll(dir, 0777)
+	err = zip.Close()
 	if err != nil {
-		log.Println("Could not create directory", dir, err)
-		t.error("mkdir")
+		t.error("streaming")
 		return
 	}
 
-	t.state.Set("savingfile")
-	fullFilename := path.Join(dir, fname)
-	err = ioutil.WriteFile(fullFilename, buff.Bytes(), 0664)
-	if err != nil {
-		t.error("filewrite")
-		return
-	}
+	// File will be closed at end of function.
 	log.Println("Successfully wrote", fullFilename, "for flow", t.id)
 }
 
@@ -314,7 +381,8 @@ func (t *TCP) State() string {
 
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
-func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
+// fs MUST be non-null.
+func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs) *TCP {
 	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
 	// 10Gbps:
 	//
@@ -341,6 +409,7 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
 		UUIDchan:     uuidchan,
 		uuidchanRead: uuidchan,
 
+		fs:    fs,
 		dir:   dir,
 		state: newStatus("notstarted"),
 		anon:  anon,
@@ -357,7 +426,7 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string) *TCP {
 // It is the caller's responsibility to close Pchan or cancel the context.
 // uuidDelay must be smaller than maxDuration.
 func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string) *TCP {
-	s := newTCP(dir, anon, id)
+	s := newTCP(dir, anon, id, afero.NewOsFs())
 	go s.start(ctx, uuidDelay, maxDuration)
 	return s
 }

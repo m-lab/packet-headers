@@ -1,7 +1,8 @@
-package saver
+package saver_test
 
 import (
 	"context"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -12,11 +13,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-lab/packet-headers/saver"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/go/rtx"
+	"github.com/spf13/afero"
 )
 
 func init() {
@@ -30,7 +34,7 @@ func TestMinInt(t *testing.T) {
 		{0, 1, 0},
 		{0, 0, 0},
 	} {
-		if minInt(c.x, c.y) != c.want {
+		if saver.MinInt(c.x, c.y) != c.want {
 			t.Errorf("Bad minInt (%+v)", c)
 		}
 	}
@@ -40,7 +44,7 @@ func TestAnonymizationWontCrashOnNil(t *testing.T) {
 	a := anonymize.New(anonymize.Netblock)
 
 	// Try to anonymize packets with no IP data.
-	anonymizePacket(a, nil) // No crash == success
+	saver.AnonymizePacket(a, nil) // No crash == success
 	buf := gopacket.NewSerializeBuffer()
 	opts := gopacket.SerializeOptions{} // See SerializeOptions for more details.
 	gopacket.SerializeLayers(buf, opts,
@@ -53,7 +57,7 @@ func TestAnonymizationWontCrashOnNil(t *testing.T) {
 		buf.Bytes(),
 		layers.LayerTypeEthernet,
 		gopacket.Default)
-	anonymizePacket(a, ethOnlyPacket) // No crash == success
+	saver.AnonymizePacket(a, ethOnlyPacket) // No crash == success
 
 	// All other cases are tested by the TestSaverWithRealv4Data and
 	// TestSaverWithRealv6Data cases later.
@@ -85,31 +89,38 @@ func (s *statusTracker) Get() string {
 	return s.status
 }
 
-func TestSaverDryRun(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverDryRun")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
+func TestPrebufferedWriter(t *testing.T) {
+	pw := saver.NewPrebufferedWriter()
+	err := pw.Redirect(nil)
+	if err != os.ErrInvalid {
+		t.Error("Should return ErrInvalid on nil writer", err)
+	}
+}
 
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverDryRun")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
+func TestSaverDryRun(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	dir, err := afero.TempDir(fs, "", "TestSaverDryRun")
+	rtx.Must(err, "Could not create tempdir")
+
+	tracker := statusTracker{status: "notstarted"}
+	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverDryRun", fs, &tracker)
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
 
 	// Send a UUID but never send any packets.
-	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
 	defer cancel()
 
 	// Wait until the status is readingcandidatepackets or the surrounding context has been cancelled.
 	go func() {
-		for s.state.Get() != "readingcandidatepackets" && ctx.Err() == nil {
+		for tracker.Get() != "readingcandidatepackets" && ctx.Err() == nil {
 			time.Sleep(1 * time.Millisecond)
 		}
 		cancel()
 	}()
 
-	s.start(ctx, 5*time.Second, 10*time.Second) // Give the disk IO 10 seconds to happen.
+	s.Start(ctx, 5*time.Millisecond, 10*time.Millisecond) // Give the disk IO 10 seconds to happen.
 	expected := statusTracker{
 		status: "stopped",
 		past:   []string{"notstarted", "readingcandidatepackets", "nopacketserror", "discardingpackets"},
@@ -123,13 +134,14 @@ func TestSaverDryRun(t *testing.T) {
 }
 
 func TestSaverWithUUID(t *testing.T) {
+	// For this one, use the real filesystem, even though we don't write anything to it.
 	dir, err := ioutil.TempDir("", "TestSaverWithUUID")
 	rtx.Must(err, "Could not create tempdir")
 	defer os.RemoveAll(dir)
 
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverWithUUID")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
+	tracker := statusTracker{status: "notstarted"}
+	fs := afero.NewOsFs()
+	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverWithUUID", fs, &tracker)
 
 	h, err := pcap.OpenOffline("../testdata/v4.pcap")
 	rtx.Must(err, "Could not open v4.pcap")
@@ -143,13 +155,13 @@ func TestSaverWithUUID(t *testing.T) {
 		s.Pchan <- packets[i]
 	}
 	// Send a UUID.
-	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: time.Now()}
 
 	// Run saver in background.
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	go func() {
 		defer cancel()
-		s.start(ctx, 100*time.Millisecond, 2*time.Second)
+		s.Start(ctx, 100*time.Millisecond, 2*time.Second)
 	}()
 
 	// Wait for 2x UUID wait duration to move to the second read/save loop.
@@ -164,7 +176,7 @@ func TestSaverWithUUID(t *testing.T) {
 
 	expected := statusTracker{
 		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "savingfile", "discardingpackets"},
+		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "discardingpackets"},
 	}
 	if !reflect.DeepEqual(&tracker, &expected) {
 		t.Errorf("%+v != %+v", &tracker, &expected)
@@ -174,153 +186,171 @@ func TestSaverWithUUID(t *testing.T) {
 	}
 }
 
-func TestSaverNoUUID(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverNoUUID")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverNoUUID")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-	for p := range ps.Packets() {
-		s.Pchan <- p
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
-	defer cancel()
-	s.start(ctx, 5*time.Second, 10*time.Second)
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuiderror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
+type limFile struct {
+	afero.File
+	numWritesRemaining int
 }
 
-func TestSaverNoUUIDClosedUUIDChan(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverNoUUIDClosedUUIDChan")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverNoUUIDClosedUUIDChan")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-	for p := range ps.Packets() {
-		s.Pchan <- p
+func (lf *limFile) Write(s []byte) (int, error) {
+	if lf.numWritesRemaining > 0 {
+		log.Println("Writing", len(s))
+		lf.numWritesRemaining--
+		return lf.File.Write(s)
 	}
-	close(s.Pchan)
-	close(s.UUIDchan)
-
-	s.start(context.Background(), 5*time.Second, 10*time.Second)
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanerror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
+	log.Println("failing write")
+	return 0, afero.ErrFileClosed
 }
 
-func TestSaverCantMkdir(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverCantMkdir")
-	rtx.Must(err, "Could not create tempdir")
-	rtx.Must(os.Chmod(dir, 0111), "Could not chmod dir to unwriteable")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantMkdir")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	s.UUIDchan <- UUIDEvent{"testUUID", time.Now()}
-
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-	for p := range ps.Packets() {
-		s.Pchan <- p
-	}
-	close(s.Pchan)
-
-	s.start(context.Background(), 5*time.Second, 10*time.Second)
-
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "mkdirerror", "discardingpackets"},
-	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
-	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
-	}
+type limFs struct {
+	afero.Fs
+	mkdirOutcome error
+	openOutcome  error
+	writeLim     int
 }
 
-func TestSaverCantCreate(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverCantCreate")
-	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
-
-	s := newTCP(dir, anonymize.New(anonymize.None), "TestSaverCantCreate")
-	tracker := statusTracker{status: s.state.Get()}
-	s.state = &tracker
-
-	// Get the packet data ready to send.
-	h, err := pcap.OpenOffline("../testdata/v4.pcap")
-	rtx.Must(err, "Could not open v4.pcap")
-	ps := gopacket.NewPacketSource(h, h.LinkType())
-
-	// A UUID containing a non-shell-safe character will never happen in
-	// practice, but it does cause the resulting file to fail in os.Create()
-	s.UUIDchan <- UUIDEvent{"test/UUID", time.Now()}
-	for p := range ps.Packets() {
-		s.Pchan <- p
+func (fs *limFs) MkdirAll(name string, perm os.FileMode) error {
+	if fs.mkdirOutcome != nil {
+		return fs.mkdirOutcome
 	}
-	close(s.Pchan)
+	return fs.Fs.MkdirAll(name, perm)
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
-	defer cancel()
-	s.start(ctx, 50*time.Millisecond, 100*time.Millisecond)
+func (fs *limFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	if fs.openOutcome != nil {
+		return nil, fs.openOutcome
+	}
 
-	expected := statusTracker{
-		status: "stopped",
-		past:   []string{"notstarted", "readingcandidatepackets", "uuidwait", "readingsavedpackets", "dircreation", "savingfile", "filewriteerror", "discardingpackets"},
+	f, err := fs.Fs.OpenFile(name, flag, perm)
+	if err != nil {
+		return nil, err
 	}
-	if !reflect.DeepEqual(&tracker, &expected) {
-		t.Errorf("%+v != %+v", &tracker, &expected)
+	lf := limFile{
+		File:               f,
+		numWritesRemaining: fs.writeLim,
 	}
-	if s.State() != "stopped" {
-		t.Errorf("%s != 'stopped'", s.State())
+	return &lf, nil
+}
+
+func TestSaverVariousErrors(t *testing.T) {
+	tests := []struct {
+		name           string
+		lfs            afero.Fs
+		uuid           string
+		closeUUID      bool
+		pcap           string
+		expectedStates []string
+	}{
+		{
+			name: "fail no uuid, open channel",
+			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
+			uuid: "", closeUUID: false,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidtimedouterror", "discardingpackets"},
+		},
+		{
+			name: "fail no uuid, closed channel",
+			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
+			uuid: "", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidchanclosederror", "discardingpackets"},
+		},
+		{
+			name: "fail on mkdir",
+			lfs:  &limFs{afero.NewMemMapFs(), os.ErrPermission, nil, 0},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "mkdirerror", "discardingpackets"},
+		},
+		{
+			name: "fail on file open",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, os.ErrPermission, 0},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "fileopenerror", "discardingpackets"},
+		},
+		{
+			name: "fail after uuid",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 0},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v4.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "writepartialerror", "discardingpackets"},
+		},
+		{
+			name: "fail after partial",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 1},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/v6.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
+		},
+		{
+			// This large file currently results in about 50 to 60 writes, but we only allow 5 writes to succeed.
+			// Note that this depends on how the zip package behaves.  If it buffers larger amounts of data, then
+			// this will behave differently.
+			name: "large, for coverage",
+			lfs:  &limFs{afero.NewMemMapFs(), nil, nil, 5},
+			uuid: "testUUID", closeUUID: true,
+			pcap:           "../testdata/large-ndt.pcap",
+			expectedStates: []string{"notstarted", "readingcandidatepackets", "uuidwait", "uuidfound", "dircreation", "writepartial", "streaming", "streamingerror", "discardingpackets"},
+		},
 	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir, err := afero.TempDir(tt.lfs, "", "TestSaver")
+			rtx.Must(err, "Could not create tempdir")
+
+			tracker := statusTracker{status: "notstarted"}
+			s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverCantStream", tt.lfs, &tracker)
+
+			// Get the packet data ready to send.
+			h, err := pcap.OpenOffline(tt.pcap)
+			rtx.Must(err, fmt.Sprint("Could not open", tt.pcap))
+			ps := gopacket.NewPacketSource(h, h.LinkType())
+
+			if len(tt.uuid) > 0 {
+				s.UUIDchan <- saver.UUIDEvent{UUID: "test/UUID", Timestamp: time.Now()}
+			}
+			packets := 0
+			for p := range ps.Packets() {
+				packets++
+				s.Pchan <- p
+			}
+			log.Println("Total of", packets, "packets")
+			if tt.closeUUID {
+				close(s.UUIDchan)
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+			defer cancel()
+			s.Start(ctx, 20*time.Millisecond, 80*time.Millisecond)
+
+			expected := statusTracker{
+				status: "stopped",
+				past:   tt.expectedStates,
+			}
+			if !reflect.DeepEqual(&tracker, &expected) {
+				t.Errorf("%+v != %+v", &tracker, &expected)
+			}
+			if s.State() != "stopped" {
+				t.Errorf("%s != 'stopped'", s.State())
+			}
+		})
+	}
+
 }
 
 func TestSaverWithRealv4Data(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverWithRealv4Data")
+	fs := afero.NewMemMapFs()
+	dir, err := afero.TempDir(fs, "", "TestSaverWithRealv4Data")
 	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
 
 	// Send a UUID and then some packets.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv4Data")
+	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv4Data")
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
-	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
@@ -386,18 +416,18 @@ func TestSaverWithRealv4Data(t *testing.T) {
 }
 
 func TestSaverWithRealv6Data(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestSaverWithRealv6Data")
+	fs := afero.NewMemMapFs()
+	dir, err := afero.TempDir(fs, "", "TestSaverWithRealv6Data")
 	rtx.Must(err, "Could not create tempdir")
-	defer os.RemoveAll(dir)
 
 	// Send a UUID and then some packets.
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 
-	s := StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv6Data")
+	s := saver.StartNew(ctx, anonymize.New(anonymize.Netblock), dir, 5*time.Second, 10*time.Second, "TestSaverWithRealv6Data")
 
 	tstamp := time.Date(2000, 1, 2, 3, 4, 5, 6, time.UTC)
-	s.UUIDchan <- UUIDEvent{"testUUID", tstamp}
+	s.UUIDchan <- saver.UUIDEvent{UUID: "testUUID", Timestamp: tstamp}
 
 	go func() {
 		// Get packets from a wireshark-produced pcap file.
