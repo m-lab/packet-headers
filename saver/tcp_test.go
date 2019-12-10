@@ -91,7 +91,7 @@ func (s *statusTracker) Get() string {
 
 func TestPrebufferedWriter(t *testing.T) {
 	pw := saver.NewPrebufferedWriter()
-	_, err := pw.Redirect(nil)
+	err := pw.Redirect(nil)
 	if err != os.ErrInvalid {
 		t.Error("Should return ErrInvalid on nil writer", err)
 	}
@@ -140,7 +140,8 @@ func TestSaverWithUUID(t *testing.T) {
 	defer os.RemoveAll(dir)
 
 	tracker := statusTracker{status: "notstarted"}
-	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverWithUUID", nil, &tracker)
+	fs := afero.NewOsFs()
+	s := saver.NewTCPWithTrackerForTest(dir, anonymize.New(anonymize.None), "TestSaverWithUUID", fs, &tracker)
 
 	h, err := pcap.OpenOffline("../testdata/v4.pcap")
 	rtx.Must(err, "Could not open v4.pcap")

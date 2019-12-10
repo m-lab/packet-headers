@@ -5,12 +5,15 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"path"
 	"sync"
 	"time"
+
+	"github.com/m-lab/go/warnonerror"
 
 	"github.com/spf13/afero"
 
@@ -59,10 +62,8 @@ func anonymizePacket(a anonymize.IPAnonymizer, p gopacket.Packet) {
 }
 
 // prebufferWriter writes to a bytes.Buffer, until redirect() is called, then writes to the provided Writer.
+// NOT THREAD SAFE.
 type prebufferedWriter struct {
-	io.Writer
-
-	lock   sync.Mutex
 	buf    *bytes.Buffer
 	writer io.Writer
 }
@@ -72,21 +73,18 @@ func newPrebufferedWriter() prebufferedWriter {
 	return prebufferedWriter{buf: bytes.NewBuffer(make([]byte, 0, 8192))}
 }
 
-func (pw *prebufferedWriter) Redirect(w io.Writer) (int64, error) {
-	pw.lock.Lock()
-	defer pw.lock.Unlock()
-
+func (pw *prebufferedWriter) Redirect(w io.Writer) error {
 	if w == nil {
-		return 0, os.ErrInvalid
+		return os.ErrInvalid
 	}
-	n, err := pw.buf.WriteTo(w)
+	_, err := pw.buf.WriteTo(w)
 	if err != nil {
-		return 0, err
+		return err
 	}
 	pw.buf = nil
 	pw.writer = w
 
-	return n, nil
+	return nil
 }
 
 func (pw *prebufferedWriter) Write(p []byte) (int, error) {
@@ -299,9 +297,9 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		t.error("fileopen")
 		return
 	}
-	defer file.Close()
+	defer warnonerror.Close(file, fmt.Sprint("Could not close", file.Name()))
 
-	_, err = pw.Redirect(file)
+	err = pw.Redirect(file)
 	if err != nil {
 		t.error("writepartial")
 		return
@@ -383,10 +381,8 @@ func (t *TCP) State() string {
 
 // newTCP makes a new saver.TCP but does not start it. It is here as its own
 // function to enable whitebox testing and instrumentation.
+// fs MUST be non-null.
 func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs) *TCP {
-	if fs == nil {
-		fs = afero.NewOsFs()
-	}
 	// With a 1500 byte MTU, this is a ~10 millisecond buffer at a line rate of
 	// 10Gbps:
 	//
