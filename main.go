@@ -48,7 +48,7 @@ var (
 
 func init() {
 	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
-	flag.Var(&maxIdleRAM, "max-idle-ram", "How much idle RAM we should tolerate before we try and forcibly return it to the OS.")
+	flag.Var(&maxIdleRAM, "maxidleram", "How much idle RAM we should tolerate before we try and forcibly return it to the OS.")
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
