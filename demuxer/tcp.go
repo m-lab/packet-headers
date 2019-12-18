@@ -36,10 +36,10 @@ type TCP struct {
 	// collect all savers in oldFlows and make all the currentFlows into
 	// oldFlows. It is only through this garbage collection process that
 	// saver.TCP objects are finalized.
-	currentFlows  map[FlowKey]*saver.TCP
-	oldFlows      map[FlowKey]*saver.TCP
-	ramWasteLimit bytecount.ByteCount
-	status        status
+	currentFlows map[FlowKey]*saver.TCP
+	oldFlows     map[FlowKey]*saver.TCP
+	maxIdleRAM   bytecount.ByteCount
+	status       status
 
 	// Variables required for the construction of new Savers
 	maxDuration      time.Duration
@@ -120,7 +120,7 @@ func (d *TCP) collectGarbage() {
 		// Tell the VM to try and return RAM to the OS.
 		ms := runtime.MemStats{}
 		runtime.ReadMemStats(&ms)
-		if ms.HeapIdle > uint64(d.ramWasteLimit) {
+		if ms.HeapIdle > uint64(d.maxIdleRAM) {
 			debug.FreeOSMemory()
 		}
 	}(d.oldFlows)
@@ -167,16 +167,16 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, idleRAMLimit bytecount.ByteCount, stream bool) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
 		uuidReadChan: uuidc,
 
-		currentFlows:  make(map[FlowKey]*saver.TCP),
-		oldFlows:      make(map[FlowKey]*saver.TCP),
-		ramWasteLimit: idleRAMLimit,
-		status:        promStatus{},
+		currentFlows: make(map[FlowKey]*saver.TCP),
+		oldFlows:     make(map[FlowKey]*saver.TCP),
+		maxIdleRAM:   maxIdleRAM,
+		status:       promStatus{},
 
 		anon:             anon,
 		dataDir:          dataDir,

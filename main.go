@@ -37,7 +37,7 @@ var (
 	maxHeaderSize    = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
 	sigtermWaitTime  = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 	streamToDisk     = flag.Bool("stream", false, "Stream results to disk instead of buffering them in RAM.")
-	maxIdleRAM       = 4 * bytecount.Gigabyte
+	maxIdleRAM       = 3 * bytecount.Gigabyte
 
 	interfaces flagx.StringArray
 
