@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/m-lab/go/bytecount"
+
 	"github.com/m-lab/go/anonymize"
 
 	"github.com/google/gopacket"
@@ -35,6 +37,7 @@ var (
 	maxHeaderSize    = flag.Int("maxheadersize", 256, "The maximum size of packet headers allowed. A lower value allows the pcap process to be less wasteful but risks more esoteric IPv6 headers (which can theoretically be up to the full size of the packet but in practice seem to be under 128) getting truncated.")
 	sigtermWaitTime  = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 	streamToDisk     = flag.Bool("stream", false, "Stream results to disk instead of buffering them in RAM.")
+	maxIdleRAM       = 3 * bytecount.Gigabyte
 
 	interfaces flagx.StringArray
 
@@ -45,6 +48,7 @@ var (
 
 func init() {
 	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
+	flag.Var(&maxIdleRAM, "maxidleram", "How much idle RAM we should tolerate before we try and forcibly return it to the OS.")
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
@@ -119,7 +123,7 @@ func main() {
 	}()
 
 	// Get ready to save the incoming packets to files.
-	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration, *captureDuration, *streamToDisk)
+	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration, *captureDuration, maxIdleRAM, *streamToDisk)
 
 	// Inform the demuxer of new UUIDs
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)

@@ -3,7 +3,11 @@ package demuxer
 
 import (
 	"context"
+	"runtime"
+	"runtime/debug"
 	"time"
+
+	"github.com/m-lab/go/bytecount"
 
 	"github.com/google/gopacket"
 	"github.com/m-lab/go/anonymize"
@@ -34,6 +38,7 @@ type TCP struct {
 	// saver.TCP objects are finalized.
 	currentFlows map[FlowKey]*saver.TCP
 	oldFlows     map[FlowKey]*saver.TCP
+	maxIdleRAM   bytecount.ByteCount
 	status       status
 
 	// Variables required for the construction of new Savers
@@ -112,6 +117,12 @@ func (d *TCP) collectGarbage() {
 			close(s.UUIDchan)
 			close(s.Pchan)
 		}
+		// Tell the VM to try and return RAM to the OS.
+		ms := runtime.MemStats{}
+		runtime.ReadMemStats(&ms)
+		if ms.HeapIdle > uint64(d.maxIdleRAM) {
+			debug.FreeOSMemory()
+		}
 	}(d.oldFlows)
 	// Record GC data.
 	d.status.GC(len(d.currentFlows), len(d.oldFlows))
@@ -156,7 +167,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, stream bool) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
@@ -164,6 +175,7 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 
 		currentFlows: make(map[FlowKey]*saver.TCP),
 		oldFlows:     make(map[FlowKey]*saver.TCP),
+		maxIdleRAM:   maxIdleRAM,
 		status:       promStatus{},
 
 		anon:             anon,
