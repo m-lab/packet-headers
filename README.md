@@ -12,42 +12,45 @@ addresses.
 ## Usage
 
 ```
-$ packet-headers -help
+$ ./packet-headers -help 2>&1 | fmt | sed -e 's/\t/        /g'
+
 Usage of ./packet-headers:
   -anonymize.ip value
         Valid values are "none" and "netblock". (default none)
   -captureduration duration
-        Only save the first captureduration of each flow, to prevent long-lived
-        flows from spamming the hard drive. (default 30s)
+        Only save the first captureduration of each flow, to prevent
+        long-lived flows from spamming the hard drive. (default 30s)
   -datadir string
         The directory to which data is written (default ".")
   -flowtimeout duration
-        Once there have been no packets for a flow for at least flowtimeout, the
-        flow can be assumed to be closed. (default 30s)
+        Once there have been no packets for a flow for at least
+        flowtimeout, the flow can be assumed to be closed. (default 30s)
   -interface value
-        The interface on which to capture traffic. May be repeated. If unset,
-        will capture on all available interfaces.
+        The interface on which to capture traffic. May be repeated. If
+        unset, will capture on all available interfaces.
   -maxheadersize int
-        The maximum size of packet headers allowed. A lower value allows the
-        pcap process to be less wasteful but risks more esoteric IPv6 headers
-        (which can theoretically be up to the full size of the packet but in
-        practice seem to be under 128) getting truncated. (default 256)
+        The maximum size of packet headers allowed. A lower value allows
+        the pcap process to be less wasteful but risks more esoteric
+        IPv6 headers (which can theoretically be up to the full size
+        of the packet but in practice seem to be under 128) getting
+        truncated. (default 256)
   -maxidleram value
-        How much idle RAM we should tolerate before we try and forcibly return
-        it to the OS. (default 3GB)
+        How much idle RAM we should tolerate before we try and forcibly
+        return it to the OS. (default 3GB)
   -prometheusx.listen-address string
          (default ":9990")
   -sigtermwait duration
-        How long should the daemon hang around before exiting after receiving a
-        SIGTERM. (default 1s)
+        How long should the daemon hang around before exiting after
+        receiving a SIGTERM. (default 1s)
   -stream
         Stream results to disk instead of buffering them in RAM.
   -tcpinfo.eventsocket string
         The filename of the unix-domain socket on which events are served.
   -uuidwaitduration duration
-        Wait up to uuidwaitduration for each flow before either assigning a UUID
-        or discarding all future packets. This prevents buffering unsaveable
-        packets. (default 5s)
+        Wait up to uuidwaitduration for each flow before either assigning
+        a UUID or discarding all future packets. This prevents buffering
+        unsaveable packets. (default 5s)
+
 ```
 
 Running `packet-headers` also requires running
