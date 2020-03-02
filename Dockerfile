@@ -4,7 +4,7 @@ RUN apk --no-cache add libpcap-dev git gcc libc-dev
 COPY . /go/src/github.com/m-lab/packet-headers
 WORKDIR /go/src/github.com/m-lab/packet-headers
 RUN go get -v \
-      -ldflags "-X github.com/m-lab/go/prometheusx.GitShortCommit=$(git log -1 --format=%h)" \
+      -ldflags "-X github.com/m-lab/go/prometheusx.GitShortCommit=$(git log -1 --format=%h)$(git diff --quiet || echo dirty)" \
       .
 RUN chmod a+rx /go/bin/packet-headers
 
