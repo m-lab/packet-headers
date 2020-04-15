@@ -447,6 +447,7 @@ func newTCP(dir string, anon anonymize.IPAnonymizer, id string, fs afero.Fs, str
 // It is the caller's responsibility to close Pchan or cancel the context.
 // uuidDelay must be smaller than maxDuration.
 func StartNew(ctx context.Context, anon anonymize.IPAnonymizer, dir string, uuidDelay, maxDuration time.Duration, id string, stream bool) *TCP {
+	log.Println("stream =", stream)
 	s := newTCP(dir, anon, id, afero.NewOsFs(), stream)
 	go s.start(ctx, uuidDelay, maxDuration)
 	return s
