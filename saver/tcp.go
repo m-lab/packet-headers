@@ -172,6 +172,7 @@ type TCP struct {
 // Increment the error counter when errors are encountered.
 func (t *TCP) error(cause string) {
 	t.state.Set(cause + "error")
+	log.Println(cause + "error")
 	metrics.SaverErrors.WithLabelValues(cause).Inc()
 }
 
@@ -280,7 +281,6 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Create a file and directory based on the UUID and the time.
 	t.state.Set("dircreation")
 	dir, fname := filename(t.dir, uuidEvent)
-	log.Println("Create", dir)
 	err := t.fs.MkdirAll(dir, 0777)
 	if err != nil {
 		t.state.Set("mkdirerror")
@@ -300,6 +300,7 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		}
 		defer warnonerror.Close(file, fmt.Sprint("Could not close", file.Name()))
 
+		log.Println("Redirect for streaming")
 		err = pw.Redirect(file)
 		if err != nil {
 			t.error("writepartial")
