@@ -249,11 +249,12 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// infrequently that the flow gets garbage-collected between packet
 	// arrivals.
 	var uuidEvent UUIDEvent
+	packetCount := 0
 	for uuidCtx.Err() == nil {
 		select {
 		// If the context expires, no need to keep capturing.
 		case <-uuidCtx.Done():
-			log.Println("Context expired waiting for UUID for flow", t.id)
+			log.Printf("Context expired after %8d packets, waiting for UUID for flow %s\n", packetCount, t.id)
 			t.error("uuidtimedout")
 			return
 
@@ -261,13 +262,14 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		case p, ok := <-t.pchanRead:
 			if ok {
 				t.savePacket(w, p, headerLen)
+				packetCount++
 			}
 
 		// Note: if packet channel gets backed up, select algorithm may drain more packets after UUID arrives.
 		case uuidEvent, ok = <-t.uuidchanRead:
 			if !ok {
 				// If the channel is closed, then we can never get the uuid, so stop capturing.
-				log.Println("UUID channel closed, PCAP capture cancelled with no UUID for flow", t.id)
+				log.Printf("UUID channel closed after %d packets, PCAP capture cancelled with no UUID for flow %s\n", packetCount, t.id)
 				t.error("uuidchanclosed")
 				return
 			}
