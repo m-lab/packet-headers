@@ -198,10 +198,10 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingcandidatepackets")
 
-	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
-	defer uuidCancel()
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
-	p, ok := t.readPacket(uuidCtx)
+	packetCtx, packetCancel := context.WithTimeout(ctx, duration)
+	defer packetCancel()
+	p, ok := t.readPacket(packetCtx)
 	if !ok {
 		// This error should never occur in production. It indicates a
 		// configuration error or a bug in packet-headers.
@@ -247,8 +247,10 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// This error will also occur for long-lived flows that send packets so
 	// infrequently that the flow gets garbage-collected between packet
 	// arrivals.
+	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
+	defer uuidCancel()
 	var uuidEvent UUIDEvent
-	for uuidCtx.Err() == nil {
+	for first := true; first || uuidCtx.Err() == nil; first = false {
 		select {
 		// If the context expires, no need to keep capturing.
 		case <-uuidCtx.Done():
@@ -309,12 +311,9 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		t.state.Set("streaming")
 	}
 
-	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
-	defer derivedCancel()
-
 	// Continue reading packets until duration has elapsed.
 	for {
-		p, ok := t.readPacket(derivedCtx)
+		p, ok := t.readPacket(packetCtx)
 		if !ok {
 			break
 		}
