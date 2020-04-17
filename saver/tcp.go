@@ -198,10 +198,10 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	// Now save packets until the stream is done or the context is canceled.
 	t.state.Set("readingcandidatepackets")
 
-	uuidCtx, uuidCancel := context.WithTimeout(ctx, uuidDelay)
-	defer uuidCancel()
 	// Read the first packet to determine the TCP+IP header size (as IPv6 is variable in size)
-	p, ok := t.readPacket(uuidCtx)
+	packetCtx, packetCancel := context.WithTimeout(ctx, duration)
+	defer packetCancel()
+	p, ok := t.readPacket(packetCtx)
 	if !ok {
 		// This error should never occur in production. It indicates a
 		// configuration error or a bug in packet-headers.
@@ -239,30 +239,44 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 	t.savePacket(w, p, headerLen)
 
 	t.state.Set("uuidwait")
-	// Read packets while waiting for uuid event, or uuidCtx expires..
-	// The error conditions below are expected to occur in production. In
-	// particular, every flow that existed prior to the start of the start of
-	// the packet-headers binary will cause this error at least once.
+	// Read packets while waiting for uuid event, or until uuidCtx expires. The
+	// "uuidtimeout" error conditions below are expected to occur in production
+	// in at least 3 normal conditions:
 	//
-	// This error will also occur for long-lived flows that send packets so
-	// infrequently that the flow gets garbage-collected between packet
-	// arrivals.
+	// (1) each flow that existed prior to the start of the packet-headers
+	// binary will cause this error at least once,
+	//
+	// (2) long-lived flows that send packets so infrequently that the flow gets
+	// garbage-collected between packet arrivals will cause this error at least
+	// once per garbage-collection round,
+	//
+	// (3) flows that send a SYN but never complete a 3-way handshake will wake
+	// up the TCP saver infrastructure because it looks like a flow was about to
+	// be created, but then the kernel never actually creates the flow.
+	//
+	// Condition 3 is a little bit worrying, as we want an infrastructure that
+	// is not too vulnerable to a SYN flood.
+	// TODO(https://github.com/m-lab/packet-headers/issues/42)
+	uuidCtx, uuidCancel := context.WithTimeout(packetCtx, uuidDelay)
+	defer uuidCancel()
 	var uuidEvent UUIDEvent
-	for uuidCtx.Err() == nil {
+uuidloop:
+	for {
 		select {
-		// If the context expires, no need to keep capturing.
+		// If the context expires, return. No progress is possible.
 		case <-uuidCtx.Done():
 			log.Println("Context expired waiting for UUID for flow", t.id)
 			t.error("uuidtimedout")
 			return
 
-		// Any packets should be written to the buffer.
+		// Any packets received while waiting for a UUID should be written to
+		// the buffer.
 		case p, ok := <-t.pchanRead:
 			if ok {
 				t.savePacket(w, p, headerLen)
 			}
 
-		// Note: if packet channel gets backed up, select algorithm may drain more packets after UUID arrives.
+		// Once the UUID arrives, exit the loop.
 		case uuidEvent, ok = <-t.uuidchanRead:
 			if !ok {
 				// If the channel is closed, then we can never get the uuid, so stop capturing.
@@ -270,9 +284,10 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 				t.error("uuidchanclosed")
 				return
 			}
-			// Once the uuid event is received we cancel the context and exit the loop.
+			// This is the expected common case.
 			t.state.Set("uuidfound")
-			uuidCancel() // Exit the loop
+			// break from the select statement and the surrounding loop.
+			break uuidloop
 		}
 	}
 
@@ -309,12 +324,9 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		t.state.Set("streaming")
 	}
 
-	derivedCtx, derivedCancel := context.WithTimeout(ctx, duration)
-	defer derivedCancel()
-
 	// Continue reading packets until duration has elapsed.
 	for {
-		p, ok := t.readPacket(derivedCtx)
+		p, ok := t.readPacket(packetCtx)
 		if !ok {
 			break
 		}
