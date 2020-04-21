@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/afpacket"
 	"github.com/google/gopacket/layers"
 	"github.com/google/gopacket/pcap"
 	"github.com/m-lab/go/rtx"
@@ -96,9 +97,10 @@ func MustCaptureTCPOnInterfaces(ctx context.Context, interfaces []net.Interface,
 	log.Printf("Using BPF filter %q\n", filter)
 	for _, iface := range interfaces {
 		// Open a packet capture. "false" means promiscuous mode is off.
-		handle, err := pcapOpenLive(iface.Name, maxHeaderSize, false, pcap.BlockForever)
+		handle, err := afpacket.NewTPacket(afpacket.OptInterface(iface.Name), afpacket.OptFrameSize(maxHeaderSize))
 		rtx.Must(err, "Could not create libpcap client for %q", iface)
-		rtx.Must(handle.SetBPFFilter(filter), "Could not set up BPF filter for TCP")
+		// TODO: figure out how to set a BPF filter
+		//rtx.Must(handle.SetBPFFilter(filter), "Could not set up BPF filter for TCP")
 
 		// Stop packet capture when this function exits.
 		defer handle.Close()
