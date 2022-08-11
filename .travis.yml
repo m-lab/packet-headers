@@ -1,4 +1,6 @@
 language: go
+go:
+ - 1.18
 
 # From https://github.com/travis-ci/travis-ci/issues/8891#issuecomment-353403729
 before_install:
@@ -10,7 +12,7 @@ install:
 - go get -v -t ./...
 
 before_script:
-- go get github.com/mattn/goveralls
+- go install github.com/mattn/goveralls@latest
 
 script:
 - go vet ./...
