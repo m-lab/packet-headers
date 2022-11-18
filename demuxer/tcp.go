@@ -14,6 +14,7 @@ import (
 	"github.com/m-lab/packet-headers/metrics"
 	"github.com/m-lab/packet-headers/saver"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/procfs"
 )
 
 // UUIDEvent is the datatype sent to a demuxer's UUIDChan to notify it about the
@@ -47,6 +48,7 @@ type TCP struct {
 	anon             anonymize.IPAnonymizer
 	dataDir          string
 	stream           bool
+	maxRSSkb         int
 }
 
 type status interface {
@@ -60,6 +62,25 @@ func (promStatus) GC(stillPresent, discarded int) {
 	metrics.DemuxerSaverCount.Set(float64(stillPresent))
 }
 
+func currentRSSBelowThreshold(maxRSSkb int) (bool, error) {
+	p, err := procfs.Self()
+	if err != nil {
+		// This is a strange situation. The process cannot read /proc info about itself.
+		return false, err
+	}
+	s, err := p.Stat()
+	if err != nil {
+		// Again, this is out of the ordinary. The process cannot read /proc info about itself.
+		return false, err
+	}
+	// RSS is in pages. Assuming 4KB pages, return in KB.
+	if s.RSS*4 > maxRSSkb {
+		// count events.
+		return false, nil
+	}
+	return true, nil
+}
+
 // GetSaver returns a saver with channels for packets and a uuid.
 func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 	// Read the flow from the flows map, the oldFlows map, or create it.
@@ -71,6 +92,9 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 		if ok {
 			delete(d.oldFlows, flow)
 		} else {
+			if below, err := currentRSSBelowThreshold(d.maxRSSkb); err != nil || !below {
+				return nil
+			}
 			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
 		}
 		d.currentFlows[flow] = t
@@ -88,6 +112,9 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 	}
 	// Send the packet to the saver.
 	s := d.getSaver(ctx, fromPacket(packet))
+	if s == nil {
+		return
+	}
 
 	// Don't block on channel write to the saver, but do note when it fails.
 	select {
@@ -100,6 +127,9 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 func (d *TCP) assignUUID(ctx context.Context, ev UUIDEvent) {
 	metrics.DemuxerUUIDCount.Inc()
 	s := d.getSaver(ctx, ev.Flow)
+	if s == nil {
+		return
+	}
 	select {
 	case s.UUIDchan <- ev.UUIDEvent:
 	default:
@@ -167,7 +197,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxRSSkb int) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
@@ -183,5 +213,6 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 		maxDuration:      maxFlowDuration,
 		uuidWaitDuration: uuidWaitDuration,
 		stream:           stream,
+		maxRSSkb:         maxRSSkb,
 	}
 }
