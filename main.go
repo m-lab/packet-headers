@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -12,13 +13,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/m-lab/go/bytecount"
-
-	"github.com/m-lab/go/anonymize"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
+	"github.com/prometheus/procfs"
 
+	"github.com/m-lab/go/anonymize"
+	"github.com/m-lab/go/bytecount"
 	"github.com/m-lab/go/flagx"
 	"github.com/m-lab/go/prometheusx"
 	"github.com/m-lab/go/rtx"
@@ -38,6 +38,7 @@ var (
 	sigtermWaitTime  = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 	streamToDisk     = flag.Bool("stream", false, "Stream results to disk instead of buffering them in RAM.")
 	maxIdleRAM       = 3 * bytecount.Gigabyte
+	maxRAMRatio      = 0.5 // Stop collecting traces after process uses maxRAMRatio of available memory.
 
 	interfaces flagx.StringArray
 
@@ -49,6 +50,7 @@ var (
 func init() {
 	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
 	flag.Var(&maxIdleRAM, "maxidleram", "How much idle RAM we should tolerate before we try and forcibly return it to the OS.")
+	flag.Float64Var(&maxRAMRatio, "maxramratio", maxRAMRatio, "Stop collecting traces if process uses more than this fraction of available RAM.")
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
@@ -73,8 +75,12 @@ var netInterfaces = net.Interfaces
 func processFlags() ([]net.Interface, error) {
 	// Verify that capture duration is always longer than uuid wait duration.
 	if *uuidWaitDuration > *captureDuration {
-		return nil, fmt.Errorf("Capture duration must be greater than UUID wait duration: %s vs %s",
+		return nil, fmt.Errorf("capture duration must be greater than UUID wait duration: %s vs %s",
 			*captureDuration, *uuidWaitDuration)
+	}
+
+	if maxRAMRatio > 1.0 || maxRAMRatio < 0.1 {
+		return nil, errors.New("maxramratio should be between 0.1 and 1.0")
 	}
 
 	// Special case for argument "-interface": if no specific interface was
@@ -111,6 +117,12 @@ func main() {
 
 	rtx.Must(os.Chdir(*dir), "Could not cd to directory %q", *dir)
 
+	// Read system memory once.
+	fs, err := procfs.NewFS("/proc")
+	rtx.Must(err, "Failed to read from /proc")
+	mi, err := fs.Meminfo()
+	rtx.Must(err, "Failed to read Meminfo")
+
 	// A waitgroup to make sure main() doesn't return before all its components
 	// get cleaned up.
 	cleanupWG := sync.WaitGroup{}
@@ -122,8 +134,12 @@ func main() {
 		cleanupWG.Done()
 	}()
 
+	// MemTotal is in KB. The product with maxRAMRatio is the max process RSS allowed.
+	maxRSSkb := int(maxRAMRatio * float64(*mi.MemTotal))
 	// Get ready to save the incoming packets to files.
-	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration, *captureDuration, maxIdleRAM, *streamToDisk)
+	tcpdm := demuxer.NewTCP(
+		anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration,
+		*captureDuration, maxIdleRAM, *streamToDisk, maxRSSkb)
 
 	// Inform the demuxer of new UUIDs
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)
