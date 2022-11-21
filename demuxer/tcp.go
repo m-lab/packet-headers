@@ -91,7 +91,7 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 			// to keep the process running and prevent resource usage from
 			// packet-headers to spill over into other components.
 			if currentHeapAboveThreshold(d.maxHeap) {
-				// TODO: count events.
+				metrics.SaversSkipped.Inc()
 				return nil
 			}
 			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
@@ -112,6 +112,7 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 	// Send the packet to the saver.
 	s := d.getSaver(ctx, fromPacket(packet))
 	if s == nil {
+		metrics.MissedPackets.WithLabelValues("skipped").Inc()
 		return
 	}
 
@@ -127,6 +128,7 @@ func (d *TCP) assignUUID(ctx context.Context, ev UUIDEvent) {
 	metrics.DemuxerUUIDCount.Inc()
 	s := d.getSaver(ctx, ev.Flow)
 	if s == nil {
+		metrics.MissedUUIDs.WithLabelValues("skipped").Inc()
 		return
 	}
 	select {
