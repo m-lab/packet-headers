@@ -84,12 +84,12 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 			// threshold. This condition is required because a SYN flood can
 			// cause packet-headers to allocate memory faster than partial
 			// connection timeouts allow the garbage collector to recover used
-			// memory. The result in that case would be RAM exhaustion.
+			// memory. The result in that case would be system RAM exhaustion.
 			//
 			// NOTE: When we are above the maxHeap threshold, we may lose some
 			// legitimate measurements. This check is a load shedding strategy
 			// to keep the process running and prevent resource usage from
-			// packet-headers to spill over into other components.
+			// packet-headers spilling over into other parts of the system.
 			if currentHeapAboveThreshold(d.maxHeap) {
 				metrics.SaversSkipped.Inc()
 				return nil

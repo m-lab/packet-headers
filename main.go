@@ -112,7 +112,10 @@ func main() {
 
 	rtx.Must(os.Chdir(*dir), "Could not cd to directory %q", *dir)
 
-	// Set a memory limit for the GC to never exceed the maxHeap bytes.
+	// Set a memory limit for the GC to keep RAM used below maxHeap bytes. This
+	// is a soft limit that will alter how the GC behaves (e.g. reclaiming more
+	// frequently, releasing RAM back to the OS) but will not stop RAM usage by
+	// the process.
 	debug.SetMemoryLimit(int64(maxHeap))
 
 	// A waitgroup to make sure main() doesn't return before all its components
