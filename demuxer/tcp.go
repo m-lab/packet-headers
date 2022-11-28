@@ -64,7 +64,6 @@ func (promStatus) GC(stillPresent, discarded int) {
 func currentHeapAboveThreshold(maxHeap uint64) bool {
 	ms := runtime.MemStats{}
 	runtime.ReadMemStats(&ms)
-	// log.Println(ms.HeapAlloc, ">", maxHeap, "==", ms.HeapAlloc > maxHeap)
 	return (ms.HeapAlloc > maxHeap)
 }
 
