@@ -1,5 +1,5 @@
 # Build packet-headers
-FROM golang:1.18-alpine3.16 as build
+FROM golang:1.19-alpine3.16 as build
 RUN apk --no-cache add libpcap-dev git gcc libc-dev
 COPY . /go/src/github.com/m-lab/packet-headers
 WORKDIR /go/src/github.com/m-lab/packet-headers

@@ -55,6 +55,12 @@ var (
 		},
 		[]string{"state"},
 	)
+	SaversSkipped = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "pcap_saver_skipped_total",
+			Help: "How many flows were never saved due to configured memory limits.",
+		},
+	)
 
 	// Demuxer metrics keep track of the state of the system that sends packets
 	// to a particular saver.

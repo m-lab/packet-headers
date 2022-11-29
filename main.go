@@ -8,17 +8,16 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"sync"
 	"syscall"
 	"time"
 
-	"github.com/m-lab/go/bytecount"
-
-	"github.com/m-lab/go/anonymize"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 
+	"github.com/m-lab/go/anonymize"
+	"github.com/m-lab/go/bytecount"
 	"github.com/m-lab/go/flagx"
 	"github.com/m-lab/go/prometheusx"
 	"github.com/m-lab/go/rtx"
@@ -38,6 +37,7 @@ var (
 	sigtermWaitTime  = flag.Duration("sigtermwait", 1*time.Second, "How long should the daemon hang around before exiting after receiving a SIGTERM.")
 	streamToDisk     = flag.Bool("stream", false, "Stream results to disk instead of buffering them in RAM.")
 	maxIdleRAM       = 3 * bytecount.Gigabyte
+	maxHeap          = 8 * bytecount.Gigabyte
 
 	interfaces flagx.StringArray
 
@@ -49,6 +49,7 @@ var (
 func init() {
 	flag.Var(&interfaces, "interface", "The interface on which to capture traffic. May be repeated. If unset, will capture on all available interfaces.")
 	flag.Var(&maxIdleRAM, "maxidleram", "How much idle RAM we should tolerate before we try and forcibly return it to the OS.")
+	flag.Var(&maxHeap, "maxheap", "Stop collecting traces once process uses more than this amount of RAM.")
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 }
 
@@ -73,7 +74,7 @@ var netInterfaces = net.Interfaces
 func processFlags() ([]net.Interface, error) {
 	// Verify that capture duration is always longer than uuid wait duration.
 	if *uuidWaitDuration > *captureDuration {
-		return nil, fmt.Errorf("Capture duration must be greater than UUID wait duration: %s vs %s",
+		return nil, fmt.Errorf("capture duration must be greater than UUID wait duration: %s vs %s",
 			*captureDuration, *uuidWaitDuration)
 	}
 
@@ -111,6 +112,12 @@ func main() {
 
 	rtx.Must(os.Chdir(*dir), "Could not cd to directory %q", *dir)
 
+	// Set a memory limit for the GC to keep RAM used below maxHeap bytes. This
+	// is a soft limit that will alter how the GC behaves (e.g. reclaiming more
+	// frequently, releasing RAM back to the OS) but will not stop RAM usage by
+	// the process.
+	debug.SetMemoryLimit(int64(maxHeap))
+
 	// A waitgroup to make sure main() doesn't return before all its components
 	// get cleaned up.
 	cleanupWG := sync.WaitGroup{}
@@ -123,7 +130,9 @@ func main() {
 	}()
 
 	// Get ready to save the incoming packets to files.
-	tcpdm := demuxer.NewTCP(anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration, *captureDuration, maxIdleRAM, *streamToDisk)
+	tcpdm := demuxer.NewTCP(
+		anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration,
+		*captureDuration, maxIdleRAM, *streamToDisk, uint64(maxHeap))
 
 	// Inform the demuxer of new UUIDs
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)

@@ -11,6 +11,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/m-lab/go/bytecount"
+
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
 
@@ -42,7 +44,7 @@ func TestTCPDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte))
 
 	// While we have a demuxer created, make sure that the processing path for
 	// packets does not crash when given a nil packet.
@@ -85,7 +87,7 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte))
 	st := &statusTracker{}
 	tcpdm.status = st
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -253,7 +255,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second, 1, true)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second, 1, true, uint64(2*bytecount.Gigabyte))
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 	var wg sync.WaitGroup

@@ -47,6 +47,7 @@ type TCP struct {
 	anon             anonymize.IPAnonymizer
 	dataDir          string
 	stream           bool
+	maxHeap          uint64
 }
 
 type status interface {
@@ -60,6 +61,12 @@ func (promStatus) GC(stillPresent, discarded int) {
 	metrics.DemuxerSaverCount.Set(float64(stillPresent))
 }
 
+func currentHeapAboveThreshold(maxHeap uint64) bool {
+	ms := runtime.MemStats{}
+	runtime.ReadMemStats(&ms)
+	return (ms.HeapAlloc > maxHeap)
+}
+
 // GetSaver returns a saver with channels for packets and a uuid.
 func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 	// Read the flow from the flows map, the oldFlows map, or create it.
@@ -71,6 +78,21 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 		if ok {
 			delete(d.oldFlows, flow)
 		} else {
+
+			// Only create a new Saver if we are below the configured maxHeap
+			// threshold. This condition is required because a SYN flood can
+			// cause packet-headers to allocate memory faster than partial
+			// connection timeouts allow the garbage collector to recover used
+			// memory. The result in that case would be system RAM exhaustion.
+			//
+			// NOTE: When we are above the maxHeap threshold, we may lose some
+			// legitimate measurements. This check is a load shedding strategy
+			// to keep the process running and prevent resource usage from
+			// packet-headers spilling over into other parts of the system.
+			if currentHeapAboveThreshold(d.maxHeap) {
+				metrics.SaversSkipped.Inc()
+				return nil
+			}
 			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
 		}
 		d.currentFlows[flow] = t
@@ -88,6 +110,10 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 	}
 	// Send the packet to the saver.
 	s := d.getSaver(ctx, fromPacket(packet))
+	if s == nil {
+		metrics.MissedPackets.WithLabelValues("skipped").Inc()
+		return
+	}
 
 	// Don't block on channel write to the saver, but do note when it fails.
 	select {
@@ -100,6 +126,10 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 func (d *TCP) assignUUID(ctx context.Context, ev UUIDEvent) {
 	metrics.DemuxerUUIDCount.Inc()
 	s := d.getSaver(ctx, ev.Flow)
+	if s == nil {
+		metrics.MissedUUIDs.WithLabelValues("skipped").Inc()
+		return
+	}
 	select {
 	case s.UUIDchan <- ev.UUIDEvent:
 	default:
@@ -167,7 +197,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxHeap uint64) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
@@ -183,5 +213,6 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 		maxDuration:      maxFlowDuration,
 		uuidWaitDuration: uuidWaitDuration,
 		stream:           stream,
+		maxHeap:          maxHeap,
 	}
 }
