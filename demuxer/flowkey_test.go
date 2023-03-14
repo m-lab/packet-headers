@@ -42,7 +42,7 @@ func TestFlowKeyFrom4Tuple(t *testing.T) {
 			dstIP:       net.ParseIP("4abc:5:6:7:8:1:2:3").To16(),
 			dstPort:     1000,
 			str:         "2abc:3:4:5:6:7:8:1:2000<->4abc:5:6:7:8:1:2:3:1000",
-			netblockStr: "2abc:3:4:5:::2000<->4abc:5:6:7:::1000",
+			netblockStr: "2abc:3:4:::2000<->4abc:5:6:::1000",
 		},
 		{
 			name:        "Same v6 host, different ports",
