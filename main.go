@@ -107,6 +107,11 @@ func main() {
 	ifaces, err := processFlags()
 	rtx.Must(err, "Failed to process flags")
 
+	// Create the data directory. This will be a no-op if it already exists.
+	if *dir != "" {
+		rtx.PanicOnError(os.MkdirAll(*dir, 0775), "Could not create the data dir %s", *dir)
+	}
+
 	psrv := prometheusx.MustServeMetrics()
 	defer warnonerror.Close(psrv, "Could not stop metric server")
 
