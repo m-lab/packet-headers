@@ -10,7 +10,8 @@ RUN chmod a+rx /go/bin/packet-headers
 
 # Put it in its own image.
 FROM alpine:3.16
-RUN apk --no-cache add libpcap
+RUN apk --no-cache add libpcap libcap
 COPY --from=build /go/bin/packet-headers /packet-headers
+RUN setcap cap_net_raw=ep /packet-headers
 WORKDIR /
 ENTRYPOINT ["/packet-headers"]
