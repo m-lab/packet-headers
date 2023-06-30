@@ -94,7 +94,10 @@ func processFlags() ([]net.Interface, error) {
 		if err != nil {
 			return ifaces, err
 		}
-		ifaces = append(ifaces, *i)
+		if i.Flags&net.FlagUp != 0 {
+			// We can only capture packets from interfaces that are up.
+			ifaces = append(ifaces, *i)
+		}
 	}
 	return ifaces, nil
 }
