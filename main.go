@@ -94,12 +94,20 @@ func processFlags() ([]net.Interface, error) {
 		if err != nil {
 			return ifaces, err
 		}
-		if i.Flags&net.FlagUp != 0 {
-			// We can only capture packets from interfaces that are up.
-			ifaces = append(ifaces, *i)
-		}
+		ifaces = append(ifaces, *i)
 	}
 	return ifaces, nil
+}
+
+func filterUpInterfaces(ifaces []net.Interface) []net.Interface {
+	result := []net.Interface{}
+	for _, iface := range ifaces {
+		if iface.Flags&net.FlagUp != 0 {
+			// We can only capture packets from interfaces that are up.
+			result = append(result, iface)
+		}
+	}
+	return result
 }
 
 func main() {
@@ -157,7 +165,7 @@ func main() {
 	// Capture packets on every interface.
 	cleanupWG.Add(1)
 	go func() {
-		muxer.MustCaptureTCPOnInterfaces(mainCtx, ifaces, packets, pcapOpenLive, int32(*maxHeaderSize))
+		muxer.MustCaptureTCPOnInterfaces(mainCtx, filterUpInterfaces(ifaces), packets, pcapOpenLive, int32(*maxHeaderSize))
 		mainCancel()
 		cleanupWG.Done()
 	}()
