@@ -4,7 +4,7 @@ go 1.18
 
 require (
 	github.com/google/gopacket v1.1.19
-	github.com/m-lab/go v0.1.59
+	github.com/m-lab/go v0.1.66
 	github.com/m-lab/tcp-info v1.5.3
 	github.com/prometheus/client_golang v1.13.0
 	github.com/spf13/afero v1.9.2
