@@ -1,6 +1,6 @@
 language: go
 go:
- - 1.19
+ - 1.20
 
 # From https://github.com/travis-ci/travis-ci/issues/8891#issuecomment-353403729
 before_install:

@@ -1,5 +1,5 @@
 # Build packet-headers
-FROM golang:1.19-alpine3.16 as build
+FROM golang:1.20-alpine3.18 as build
 RUN apk --no-cache add libpcap-dev git gcc libc-dev
 COPY . /go/src/github.com/m-lab/packet-headers
 WORKDIR /go/src/github.com/m-lab/packet-headers
@@ -9,7 +9,7 @@ RUN go install -v \
 RUN chmod a+rx /go/bin/packet-headers
 
 # Put it in its own image.
-FROM alpine:3.16
+FROM alpine:3.18
 RUN apk --no-cache add libpcap libcap
 COPY --from=build /go/bin/packet-headers /packet-headers
 RUN setcap cap_net_raw=ep /packet-headers
