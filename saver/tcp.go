@@ -295,6 +295,13 @@ uuidloop:
 	}
 
 	// uuidEvent is now set to a good value.
+	// Write the header and all the packets we have received so far.
+	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
+	for _, earlyPacket := range earlyPackets {
+		t.savePacket(w, earlyPacket, headerLen)
+	}
+	earlyPackets = nil
+
 	// Create a file and directory based on the UUID and the time.
 	t.state.Set("dircreation")
 	dir, fname := filename(t.dir, uuidEvent)
@@ -326,13 +333,6 @@ uuidloop:
 
 		t.state.Set("streaming")
 	}
-
-	// Write the header and all the packets we have received so far.
-	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
-	for _, earlyPacket := range earlyPackets {
-		t.savePacket(w, earlyPacket, headerLen)
-	}
-	earlyPackets = nil
 
 	// Continue reading packets until duration has elapsed.
 	for {
