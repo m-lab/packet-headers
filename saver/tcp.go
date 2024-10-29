@@ -191,6 +191,10 @@ func (t *TCP) start(ctx context.Context, uuidDelay, duration time.Duration) {
 func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration) {
 	pw := newPrebufferedWriter()
 
+	// Provide a buffer for packets that are captured before a corresponding UUID
+	// is received. This prevents us from allocating the pcapgo writer before we
+	// are sure that we are going to need it.
+	earlyPackets := make([]gopacket.Packet, 0)
 	zip := gzip.NewWriter(&pw)
 
 	// Write PCAP data to the buffer.
@@ -234,9 +238,8 @@ func (t *TCP) savePackets(ctx context.Context, uuidDelay, duration time.Duration
 		// overall packet size and then adding 60.
 		headerLen = len(p.Data()) - len(tl.LayerContents()) - len(tl.LayerPayload()) + 60
 	}
-	// Write out the header and the first packet.
-	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
-	t.savePacket(w, p, headerLen)
+	// Store the first packet in the temporary buffer.
+	earlyPackets = append(earlyPackets, p)
 
 	t.state.Set("uuidwait")
 	// Read packets while waiting for uuid event, or until uuidCtx expires. The
@@ -273,7 +276,7 @@ uuidloop:
 		// the buffer.
 		case p, ok := <-t.pchanRead:
 			if ok {
-				t.savePacket(w, p, headerLen)
+				earlyPackets = append(earlyPackets, p)
 			}
 
 		// Once the UUID arrives, exit the loop.
@@ -323,6 +326,13 @@ uuidloop:
 
 		t.state.Set("streaming")
 	}
+
+	// Write the header and all the packets we have received so far.
+	w.WriteFileHeader(uint32(headerLen), layers.LinkTypeEthernet)
+	for _, earlyPacket := range earlyPackets {
+		t.savePacket(w, earlyPacket, headerLen)
+	}
+	earlyPackets = nil
 
 	// Continue reading packets until duration has elapsed.
 	for {
