@@ -169,6 +169,16 @@ type TCP struct {
 	stopOnce sync.Once
 }
 
+// PChan returns the Pchan field.
+func (t *TCP) PChan() chan<- gopacket.Packet {
+	return t.Pchan
+}
+
+// UUIDChan returns the UUIDchan field.
+func (t *TCP) UUIDChan() chan<- UUIDEvent {
+	return t.UUIDchan
+}
+
 // Increment the error counter when errors are encountered.
 func (t *TCP) error(cause string) {
 	t.state.Set(cause + "error")
