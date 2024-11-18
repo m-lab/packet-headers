@@ -99,6 +99,7 @@ type TCP struct {
 	oldFlows     map[FlowKey]Saver
 	drainSaver   *drain
 	maxIdleRAM   bytecount.ByteCount
+	maxFlows     int
 	status       status
 
 	// Variables required for the construction of new Savers
@@ -154,9 +155,10 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) Saver {
 				return d.drainSaver
 			}
 
-			// If the number of current flows exceeds the configured threshold, do not
-			// create a new Saver and return drainSaver instead.
-			if len(d.currentFlows) > 100 {
+			// If there is a maximum number of flows configured and the number
+			// of current flows exceeds it, do not create a new Saver and
+			// return drainSaver instead.
+			if d.maxFlows != 0 && len(d.currentFlows) > d.maxFlows {
 				metrics.DemuxerIgnoredCount.Inc()
 				return d.drainSaver
 			}
@@ -269,7 +271,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxHeap uint64) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxHeap uint64, maxFlows int) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
@@ -286,5 +288,6 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 		uuidWaitDuration: uuidWaitDuration,
 		stream:           stream,
 		maxHeap:          maxHeap,
+		maxFlows:         maxFlows,
 	}
 }
