@@ -11,12 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m-lab/go/bytecount"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
-
 	"github.com/m-lab/go/anonymize"
+	"github.com/m-lab/go/bytecount"
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/packet-headers/saver"
 )
@@ -44,7 +42,7 @@ func TestTCPDryRun(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte))
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte), 0)
 
 	// While we have a demuxer created, make sure that the processing path for
 	// packets does not crash when given a nil packet.
@@ -87,7 +85,7 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte))
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte), 0)
 	st := &statusTracker{}
 	tcpdm.status = st
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -225,17 +223,6 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	if len(v6) != 8 {
 		t.Errorf("%+v should have length 8 not %d", v6, len(v6))
 	}
-
-	// After all that, also check that writes to an out-of-capacity Pchan will
-	// not block.
-	sav := tcpdm.getSaver(ctx, flow1)
-	close(sav.Pchan)
-	close(sav.UUIDchan)
-	// This new channel assigned to sav.Pchan will never be read, so if a blocking
-	// write is performed then this goroutine will block.
-	sav.Pchan = make(chan gopacket.Packet)
-	tcpdm.savePacket(ctx, flow1packets[0])
-	// If this doesn't block, then success!
 }
 
 func TestUUIDWontBlock(t *testing.T) {
@@ -255,7 +242,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second, 1, true, uint64(2*bytecount.Gigabyte))
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second, 1, true, uint64(2*bytecount.Gigabyte), 0)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 	var wg sync.WaitGroup
@@ -280,4 +267,42 @@ func TestUUIDWontBlock(t *testing.T) {
 	cancel()
 	wg.Wait()
 	// No freeze == success!
+}
+
+func Test_drain(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	drain := newDrain()
+
+	go func() {
+		<-time.After(100 * time.Millisecond)
+		cancel()
+	}()
+
+	drain.start(ctx)
+
+	drain = newDrain()
+	close(drain.pChan)
+	// This should immediately return if the channel is closed.
+	drain.start(context.Background())
+
+	drain = newDrain()
+	close(drain.uuidChan)
+	// This should immediately return if the channel is closed.
+	drain.start(context.Background())
+
+	// No freeze = success.
+
+	// Test the getters.
+	if drain.PChan() != drain.pChan {
+		t.Error("PChan() should return pChan")
+	}
+
+	if drain.UUIDChan() != drain.uuidChan {
+		t.Error("UUIDChan() should return uuidChan")
+	}
+
+	// Test that the state is always "draining".
+	if drain.State() != "draining" {
+		t.Error("State() should return 'draining'")
+	}
 }

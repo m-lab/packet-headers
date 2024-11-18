@@ -16,6 +16,65 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// Saver allows to save data coming from this demuxer.
+type Saver interface {
+	PChan() chan<- gopacket.Packet
+	UUIDChan() chan<- saver.UUIDEvent
+	State() string
+}
+
+// A saver implementation that only drains the packet and UUID channels, to
+// effectively ignore all packets and UUIDs for specific flows.
+type drain struct {
+	pChan    chan gopacket.Packet
+	uuidChan chan saver.UUIDEvent
+}
+
+// newDrain returns a draining saver and starts a new goroutine to constantly
+// drain the packet and the uuid channels until they are closed or the context
+// is canceled.
+func newDrain() *drain {
+	// Use the same buffer size as the real saver because even if all writes to
+	// these channel are non-blocking, we don't want to increase Prometheus
+	// counters for failed writes in case we can't read fast enough.
+	return &drain{
+		pChan:    make(chan gopacket.Packet, 8192),
+		uuidChan: make(chan saver.UUIDEvent, 1),
+	}
+}
+
+func (d *drain) start(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-d.pChan:
+			if !ok {
+				return
+			}
+		case _, ok := <-d.uuidChan:
+			if !ok {
+				return
+			}
+		}
+	}
+}
+
+// PChan returns the pChan channel.
+func (d *drain) PChan() chan<- gopacket.Packet {
+	return d.pChan
+}
+
+// UUIDChan returns the uuidChan channel.
+func (d *drain) UUIDChan() chan<- saver.UUIDEvent {
+	return d.uuidChan
+}
+
+// State always returns "draining".
+func (d *drain) State() string {
+	return "draining"
+}
+
 // UUIDEvent is the datatype sent to a demuxer's UUIDChan to notify it about the
 // UUID of new flows.
 type UUIDEvent struct {
@@ -36,9 +95,11 @@ type TCP struct {
 	// collect all savers in oldFlows and make all the currentFlows into
 	// oldFlows. It is only through this garbage collection process that
 	// saver.TCP objects are finalized.
-	currentFlows map[FlowKey]*saver.TCP
-	oldFlows     map[FlowKey]*saver.TCP
+	currentFlows map[FlowKey]Saver
+	oldFlows     map[FlowKey]Saver
+	drainSaver   *drain
 	maxIdleRAM   bytecount.ByteCount
+	maxFlows     int
 	status       status
 
 	// Variables required for the construction of new Savers
@@ -68,7 +129,7 @@ func currentHeapAboveThreshold(maxHeap uint64) bool {
 }
 
 // GetSaver returns a saver with channels for packets and a uuid.
-func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
+func (d *TCP) getSaver(ctx context.Context, flow FlowKey) Saver {
 	// Read the flow from the flows map, the oldFlows map, or create it.
 	t, ok := d.currentFlows[flow]
 	if !ok {
@@ -91,8 +152,17 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) *saver.TCP {
 			// packet-headers spilling over into other parts of the system.
 			if currentHeapAboveThreshold(d.maxHeap) {
 				metrics.SaversSkipped.Inc()
-				return nil
+				return d.drainSaver
 			}
+
+			// If there is a maximum number of flows configured and the number
+			// of current flows exceeds it, do not create a new Saver and
+			// return drainSaver instead.
+			if d.maxFlows != 0 && len(d.currentFlows) > d.maxFlows {
+				metrics.DemuxerIgnoredCount.Inc()
+				return d.drainSaver
+			}
+
 			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
 		}
 		d.currentFlows[flow] = t
@@ -117,7 +187,7 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 
 	// Don't block on channel write to the saver, but do note when it fails.
 	select {
-	case s.Pchan <- packet:
+	case s.PChan() <- packet:
 	default:
 		metrics.MissedPackets.WithLabelValues(s.State()).Inc()
 	}
@@ -131,7 +201,7 @@ func (d *TCP) assignUUID(ctx context.Context, ev UUIDEvent) {
 		return
 	}
 	select {
-	case s.UUIDchan <- ev.UUIDEvent:
+	case s.UUIDChan() <- ev.UUIDEvent:
 	default:
 		metrics.MissedUUIDs.WithLabelValues(s.State()).Inc()
 	}
@@ -142,10 +212,10 @@ func (d *TCP) collectGarbage() {
 	defer timer.ObserveDuration()
 
 	// Collect garbage in a separate goroutine.
-	go func(toBeDeleted map[FlowKey]*saver.TCP) {
+	go func(toBeDeleted map[FlowKey]Saver) {
 		for _, s := range toBeDeleted {
-			close(s.UUIDchan)
-			close(s.Pchan)
+			close(s.UUIDChan())
+			close(s.PChan())
 		}
 		// Tell the VM to try and return RAM to the OS.
 		ms := runtime.MemStats{}
@@ -158,7 +228,7 @@ func (d *TCP) collectGarbage() {
 	d.status.GC(len(d.currentFlows), len(d.oldFlows))
 	// Advance the generation.
 	d.oldFlows = d.currentFlows
-	d.currentFlows = make(map[FlowKey]*saver.TCP)
+	d.currentFlows = make(map[FlowKey]Saver)
 }
 
 // CapturePackets captures the packets from the channel `packets` and hands them
@@ -173,6 +243,10 @@ func (d *TCP) collectGarbage() {
 // closing both the passed-in packet channel and the UUIDChan to indicate that
 // no future input is possible.
 func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet, gcTicker <-chan time.Time) {
+	// Start the drain goroutine.
+	d.drainSaver = newDrain()
+	go d.drainSaver.start(ctx)
+
 	// This is the loop that has to run at high speed. All processing that can
 	// happen outside this loop should happen outside this loop. No function
 	// called from this loop should ever block.
@@ -197,14 +271,14 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxHeap uint64) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxHeap uint64, maxFlows int) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
 		uuidReadChan: uuidc,
 
-		currentFlows: make(map[FlowKey]*saver.TCP),
-		oldFlows:     make(map[FlowKey]*saver.TCP),
+		currentFlows: make(map[FlowKey]Saver),
+		oldFlows:     make(map[FlowKey]Saver),
 		maxIdleRAM:   maxIdleRAM,
 		status:       promStatus{},
 
@@ -214,5 +288,6 @@ func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFl
 		uuidWaitDuration: uuidWaitDuration,
 		stream:           stream,
 		maxHeap:          maxHeap,
+		maxFlows:         maxFlows,
 	}
 }
