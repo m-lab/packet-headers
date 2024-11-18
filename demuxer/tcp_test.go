@@ -223,17 +223,6 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	if len(v6) != 8 {
 		t.Errorf("%+v should have length 8 not %d", v6, len(v6))
 	}
-
-	// After all that, also check that writes to an out-of-capacity Pchan will
-	// not block.
-	// sav := tcpdm.getSaver(ctx, flow1)
-	// close(sav.PChan())
-	// close(sav.UUIDChan())
-	// // This new channel assigned to sav.Pchan will never be read, so if a blocking
-	// // write is performed then this goroutine will block.
-	// sav.Pchan = make(chan gopacket.Packet)
-	// tcpdm.savePacket(ctx, flow1packets[0])
-	// If this doesn't block, then success!
 }
 
 func TestUUIDWontBlock(t *testing.T) {
