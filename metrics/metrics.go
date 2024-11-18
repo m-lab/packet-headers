@@ -95,6 +95,12 @@ var (
 			Help: "How many savers were still active after the most recent garbage collection round",
 		},
 	)
+	DemuxerIgnoredCount = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "pcap_demuxer_ignored_total",
+			Help: "How many packets or UUIDs were ignored due to the configured flow limit.",
+		},
+	)
 
 	BadEventsFromTCPInfo = promauto.NewCounterVec(
 		prometheus.CounterOpts{

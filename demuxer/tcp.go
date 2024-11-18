@@ -16,48 +16,61 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 )
 
+// Saver allows to save data coming from this demuxer.
 type Saver interface {
 	PChan() chan<- gopacket.Packet
 	UUIDChan() chan<- saver.UUIDEvent
 	State() string
 }
 
-// An implementation that only drains the packet and UUID channels, to
+// A saver implementation that only drains the packet and UUID channels, to
 // effectively ignore all packets and UUIDs for specific flows.
 type drain struct {
-	pChan    chan<- gopacket.Packet
-	uuidChan chan<- saver.UUIDEvent
+	pChan    chan gopacket.Packet
+	uuidChan chan saver.UUIDEvent
 }
 
-func newDrain(ctx context.Context) Saver {
-	pchan := make(chan gopacket.Packet, 8192)
-	uuidchan := make(chan saver.UUIDEvent, 100)
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-pchan:
-				// NOTHING
-			case <-uuidchan:
-				// NOTHING
-			}
-		}
-	}()
+// newDrain returns a draining saver and starts a new goroutine to constantly
+// drain the packet and the uuid channels until they are closed or the context
+// is canceled.
+func newDrain() *drain {
+	// Use the same buffer size as the real saver because even if all writes to
+	// these channel are non-blocking, we don't want to increase Prometheus
+	// counters for failed writes in case we can't read fast enough.
 	return &drain{
-		pChan:    pchan,
-		uuidChan: uuidchan,
+		pChan:    make(chan gopacket.Packet, 8192),
+		uuidChan: make(chan saver.UUIDEvent, 1),
 	}
 }
 
+func (d *drain) start(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case _, ok := <-d.pChan:
+			if !ok {
+				return
+			}
+		case _, ok := <-d.uuidChan:
+			if !ok {
+				return
+			}
+		}
+	}
+}
+
+// PChan returns the pChan channel.
 func (d *drain) PChan() chan<- gopacket.Packet {
 	return d.pChan
 }
 
+// UUIDChan returns the uuidChan channel.
 func (d *drain) UUIDChan() chan<- saver.UUIDEvent {
 	return d.uuidChan
 }
 
+// State always returns "draining".
 func (d *drain) State() string {
 	return "draining"
 }
@@ -84,7 +97,7 @@ type TCP struct {
 	// saver.TCP objects are finalized.
 	currentFlows map[FlowKey]Saver
 	oldFlows     map[FlowKey]Saver
-	drain        Saver
+	drainSaver   *drain
 	maxIdleRAM   bytecount.ByteCount
 	status       status
 
@@ -138,15 +151,17 @@ func (d *TCP) getSaver(ctx context.Context, flow FlowKey) Saver {
 			// packet-headers spilling over into other parts of the system.
 			if currentHeapAboveThreshold(d.maxHeap) {
 				metrics.SaversSkipped.Inc()
-				return d.drain
+				return d.drainSaver
 			}
 
+			// If the number of current flows exceeds the configured threshold, do not
+			// create a new Saver and return drainSaver instead.
 			if len(d.currentFlows) > 100 {
-				metrics.SaversSkipped.Inc()
-				return d.drain
-			} else {
-				t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
+				metrics.DemuxerIgnoredCount.Inc()
+				return d.drainSaver
 			}
+
+			t = saver.StartNew(ctx, d.anon, d.dataDir, d.uuidWaitDuration, d.maxDuration, flow.Format(d.anon), d.stream)
 		}
 		d.currentFlows[flow] = t
 	}
@@ -227,7 +242,8 @@ func (d *TCP) collectGarbage() {
 // no future input is possible.
 func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet, gcTicker <-chan time.Time) {
 	// Start the drain goroutine.
-	d.drain = newDrain(ctx)
+	d.drainSaver = newDrain()
+	go d.drainSaver.start(ctx)
 
 	// This is the loop that has to run at high speed. All processing that can
 	// happen outside this loop should happen outside this loop. No function

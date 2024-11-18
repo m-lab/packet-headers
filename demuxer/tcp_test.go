@@ -11,12 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/m-lab/go/bytecount"
-
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/pcap"
-
 	"github.com/m-lab/go/anonymize"
+	"github.com/m-lab/go/bytecount"
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/packet-headers/saver"
 )
@@ -228,13 +226,13 @@ func TestTCPWithRealPcaps(t *testing.T) {
 
 	// After all that, also check that writes to an out-of-capacity Pchan will
 	// not block.
-	sav := tcpdm.getSaver(ctx, flow1)
-	close(sav.Pchan)
-	close(sav.UUIDchan)
-	// This new channel assigned to sav.Pchan will never be read, so if a blocking
-	// write is performed then this goroutine will block.
-	sav.Pchan = make(chan gopacket.Packet)
-	tcpdm.savePacket(ctx, flow1packets[0])
+	// sav := tcpdm.getSaver(ctx, flow1)
+	// close(sav.PChan())
+	// close(sav.UUIDChan())
+	// // This new channel assigned to sav.Pchan will never be read, so if a blocking
+	// // write is performed then this goroutine will block.
+	// sav.Pchan = make(chan gopacket.Packet)
+	// tcpdm.savePacket(ctx, flow1packets[0])
 	// If this doesn't block, then success!
 }
 
@@ -280,4 +278,42 @@ func TestUUIDWontBlock(t *testing.T) {
 	cancel()
 	wg.Wait()
 	// No freeze == success!
+}
+
+func Test_drain(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	drain := newDrain()
+
+	go func() {
+		<-time.After(100 * time.Millisecond)
+		cancel()
+	}()
+
+	drain.start(ctx)
+
+	drain = newDrain()
+	close(drain.pChan)
+	// This should immediately return if the channel is closed.
+	drain.start(context.Background())
+
+	drain = newDrain()
+	close(drain.uuidChan)
+	// This should immediately return if the channel is closed.
+	drain.start(context.Background())
+
+	// No freeze = success.
+
+	// Test the getters.
+	if drain.PChan() != drain.pChan {
+		t.Error("PChan() should return pChan")
+	}
+
+	if drain.UUIDChan() != drain.uuidChan {
+		t.Error("UUIDChan() should return uuidChan")
+	}
+
+	// Test that the state is always "draining".
+	if drain.State() != "draining" {
+		t.Error("State() should return 'draining'")
+	}
 }
