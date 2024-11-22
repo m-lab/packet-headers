@@ -24,6 +24,13 @@ var (
 		[]string{"saverstate"},
 	)
 
+	SynFloodDrops = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "pcap_synflood_drops_total",
+			Help: "Number of flows dropped due to SYN flood detection",
+		},
+	)
+
 	// Savers are internal data structures each with a single associated
 	// goroutine, that are allocated and run once for each connection. The start
 	// and stop of that goroutine is counted in SaversStarted and SaversStopped,

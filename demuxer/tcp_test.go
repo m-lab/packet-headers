@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io/ioutil"
 	"log"
+	"net"
 	"os"
 	"os/exec"
 	"sync"
@@ -37,12 +38,17 @@ func (f *fakePacketSource) run() {
 	}
 }
 
+type noopDetector struct{}
+
+func (d *noopDetector) AddSyn(net.IP)          {}
+func (d *noopDetector) IsFlooding(net.IP) bool { return false }
+
 func TestTCPDryRun(t *testing.T) {
-	dir, err := ioutil.TempDir("", "TestTCPDryRun")
+	dir, err := os.MkdirTemp("", "TestTCPDryRun")
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte), 0)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte), 0, nil)
 
 	// While we have a demuxer created, make sure that the processing path for
 	// packets does not crash when given a nil packet.
@@ -85,7 +91,7 @@ func TestTCPWithRealPcaps(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte), 0)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 500*time.Millisecond, time.Second, 1000000000, true, uint64(2*bytecount.Gigabyte), 0, &noopDetector{})
 	st := &statusTracker{}
 	tcpdm.status = st
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -242,7 +248,7 @@ func TestUUIDWontBlock(t *testing.T) {
 	rtx.Must(err, "Could not create directory")
 	defer os.RemoveAll(dir)
 
-	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second, 1, true, uint64(2*bytecount.Gigabyte), 0)
+	tcpdm := NewTCP(anonymize.New(anonymize.None), dir, 15*time.Second, 30*time.Second, 1, true, uint64(2*bytecount.Gigabyte), 0, &noopDetector{})
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 
 	var wg sync.WaitGroup

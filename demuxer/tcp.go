@@ -3,6 +3,7 @@ package demuxer
 
 import (
 	"context"
+	"net"
 	"runtime"
 	"runtime/debug"
 	"time"
@@ -10,6 +11,7 @@ import (
 	"github.com/m-lab/go/bytecount"
 
 	"github.com/google/gopacket"
+	"github.com/google/gopacket/layers"
 	"github.com/m-lab/go/anonymize"
 	"github.com/m-lab/packet-headers/metrics"
 	"github.com/m-lab/packet-headers/saver"
@@ -21,6 +23,11 @@ type Saver interface {
 	PChan() chan<- gopacket.Packet
 	UUIDChan() chan<- saver.UUIDEvent
 	State() string
+}
+
+type detector interface {
+	AddSyn(net.IP)
+	IsFlooding(net.IP) bool
 }
 
 // A saver implementation that only drains the packet and UUID channels, to
@@ -90,6 +97,8 @@ type UUIDEvent struct {
 type TCP struct {
 	UUIDChan     chan<- UUIDEvent
 	uuidReadChan <-chan UUIDEvent
+
+	synFloodDetector detector
 
 	// We use a generational GC. Every time the GC timer advances, we garbage
 	// collect all savers in oldFlows and make all the currentFlows into
@@ -178,6 +187,7 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 		metrics.DemuxerBadPacket.Inc()
 		return
 	}
+
 	// Send the packet to the saver.
 	s := d.getSaver(ctx, fromPacket(packet))
 	if s == nil {
@@ -254,6 +264,22 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 	for {
 		select {
 		case packet := <-packets:
+			// Early SYN flood detection
+			srcIP := net.IP(packet.NetworkLayer().NetworkFlow().Src().Raw())
+			dstIP := net.IP(packet.NetworkLayer().NetworkFlow().Dst().Raw())
+			tcpLayer := packet.TransportLayer().(*layers.TCP)
+
+			// Update flood detection only for SYN packets
+			if tcpLayer.SYN && !tcpLayer.ACK {
+				d.synFloodDetector.AddSyn(srcIP)
+			}
+
+			// Drop packets if either endpoint is flooding
+			if d.synFloodDetector.IsFlooding(srcIP) || d.synFloodDetector.IsFlooding(dstIP) {
+				metrics.SynFloodDrops.Inc()
+				continue
+			}
+
 			// Get a packet and save it.
 			d.savePacket(ctx, packet)
 		case ev = <-d.uuidReadChan:
@@ -271,11 +297,15 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
 // to send TCP/IP packets for subsequent saving to a file.
-func NewTCP(anon anonymize.IPAnonymizer, dataDir string, uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount, stream bool, maxHeap uint64, maxFlows int) *TCP {
+func NewTCP(anon anonymize.IPAnonymizer, dataDir string,
+	uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount,
+	stream bool, maxHeap uint64, maxFlows int, detector detector) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
 		uuidReadChan: uuidc,
+
+		synFloodDetector: detector,
 
 		currentFlows: make(map[FlowKey]Saver),
 		oldFlows:     make(map[FlowKey]Saver),

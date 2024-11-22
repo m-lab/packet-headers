@@ -23,6 +23,7 @@ import (
 	"github.com/m-lab/go/rtx"
 	"github.com/m-lab/go/warnonerror"
 	"github.com/m-lab/packet-headers/demuxer"
+	"github.com/m-lab/packet-headers/detector"
 	"github.com/m-lab/packet-headers/muxer"
 	"github.com/m-lab/packet-headers/tcpinfohandler"
 	"github.com/m-lab/tcp-info/eventsocket"
@@ -46,6 +47,13 @@ var (
 	// Context and injected variables to allow smoke testing of main()
 	mainCtx, mainCancel = context.WithCancel(context.Background())
 	pcapOpenLive        = pcap.OpenLive
+
+	// SYN flood detection tunables.
+	synFloodWindow    = flag.Duration("synflood.window", 5*time.Second, "Duration of each window for SYN flood detection")
+	synFloodWindows   = flag.Int("synflood.numwindows", 12, "Number of windows to maintain (window × numwindows = block duration)")
+	synFloodWidth     = flag.Uint("synflood.width", 8000, "Width of Count-Min Sketch (larger = more accurate, more memory)")
+	synFloodDepth     = flag.Uint("synflood.depth", 4, "Number of hash functions (4-5 typical)")
+	synFloodThreshold = flag.Uint("synflood.threshold", 100, "Number of SYNs allowed per source IP across all windows before blocking")
 )
 
 func init() {
@@ -150,7 +158,14 @@ func main() {
 	// Get ready to save the incoming packets to files.
 	tcpdm := demuxer.NewTCP(
 		anonymize.New(anonymize.IPAnonymizationFlag), *dir, *uuidWaitDuration,
-		*captureDuration, maxIdleRAM, *streamToDisk, uint64(maxHeap), *maxFlows)
+		*captureDuration, maxIdleRAM, *streamToDisk, uint64(maxHeap), *maxFlows,
+		detector.NewSynFloodDetector(
+			*synFloodWindow,
+			*synFloodWindows,
+			uint32(*synFloodWidth),
+			uint32(*synFloodDepth),
+			uint32(*synFloodThreshold),
+		))
 
 	// Inform the demuxer of new UUIDs
 	h := tcpinfohandler.New(mainCtx, tcpdm.UUIDChan)
