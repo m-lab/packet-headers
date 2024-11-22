@@ -3,6 +3,7 @@ module github.com/m-lab/packet-headers
 go 1.20
 
 require (
+	github.com/cespare/xxhash/v2 v2.1.2
 	github.com/google/gopacket v1.1.19
 	github.com/m-lab/go v0.1.66
 	github.com/m-lab/tcp-info v1.5.3
@@ -13,8 +14,6 @@ require (
 require (
 	github.com/araddon/dateparse v0.0.0-20200409225146-d820a6159ab1 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
-	github.com/cespare/xxhash v1.1.0 // indirect
-	github.com/cespare/xxhash/v2 v2.1.2 // indirect
 	github.com/gocarina/gocsv v0.0.0-20220729221910-a7386ae0b221 // indirect
 	github.com/golang/protobuf v1.5.2 // indirect
 	github.com/matttproud/golang_protobuf_extensions v1.0.1 // indirect
