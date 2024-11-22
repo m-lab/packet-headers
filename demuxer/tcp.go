@@ -3,7 +3,6 @@ package demuxer
 
 import (
 	"context"
-	"log"
 	"net"
 	"runtime"
 	"runtime/debug"
@@ -185,12 +184,6 @@ func (d *TCP) savePacket(ctx context.Context, packet gopacket.Packet) {
 		return
 	}
 
-	// Add debug logging
-	srcIP := packet.NetworkLayer().NetworkFlow().Src()
-	tcpLayer := packet.TransportLayer().(*layers.TCP)
-	log.Printf("savePacket called for %v, SYN=%v ACK=%v",
-		srcIP, tcpLayer.SYN, tcpLayer.ACK)
-
 	// Send the packet to the saver.
 	s := d.getSaver(ctx, fromPacket(packet))
 	if s == nil {
@@ -296,18 +289,6 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 			return
 		}
 	}
-}
-
-// checkSynFlood returns true if this packet is from a flooding source.
-// It should only be called with SYN packets.
-func (d *TCP) checkSynFlood(p gopacket.Packet) bool {
-	srcIP := p.NetworkLayer().NetworkFlow().Src().Raw()
-	d.synFloodDetector.AddSyn(net.IP(srcIP))
-	if d.synFloodDetector.IsFlooding(net.IP(srcIP)) {
-		metrics.SynFloodDrops.Inc()
-		return true
-	}
-	return false
 }
 
 // NewTCP creates a demuxer.TCP, which is the system which chooses which channel
