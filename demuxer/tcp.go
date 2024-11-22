@@ -13,7 +13,6 @@ import (
 	"github.com/google/gopacket"
 	"github.com/google/gopacket/layers"
 	"github.com/m-lab/go/anonymize"
-	"github.com/m-lab/packet-headers/detector"
 	"github.com/m-lab/packet-headers/metrics"
 	"github.com/m-lab/packet-headers/saver"
 	"github.com/prometheus/client_golang/prometheus"
@@ -24,6 +23,11 @@ type Saver interface {
 	PChan() chan<- gopacket.Packet
 	UUIDChan() chan<- saver.UUIDEvent
 	State() string
+}
+
+type detector interface {
+	AddSyn(net.IP)
+	IsFlooding(net.IP) bool
 }
 
 // A saver implementation that only drains the packet and UUID channels, to
@@ -94,7 +98,7 @@ type TCP struct {
 	UUIDChan     chan<- UUIDEvent
 	uuidReadChan <-chan UUIDEvent
 
-	synFloodDetector *detector.SynFloodDetector
+	synFloodDetector detector
 
 	// We use a generational GC. Every time the GC timer advances, we garbage
 	// collect all savers in oldFlows and make all the currentFlows into
@@ -295,7 +299,7 @@ func (d *TCP) CapturePackets(ctx context.Context, packets <-chan gopacket.Packet
 // to send TCP/IP packets for subsequent saving to a file.
 func NewTCP(anon anonymize.IPAnonymizer, dataDir string,
 	uuidWaitDuration, maxFlowDuration time.Duration, maxIdleRAM bytecount.ByteCount,
-	stream bool, maxHeap uint64, maxFlows int, detector *detector.SynFloodDetector) *TCP {
+	stream bool, maxHeap uint64, maxFlows int, detector detector) *TCP {
 	uuidc := make(chan UUIDEvent, 100)
 	return &TCP{
 		UUIDChan:     uuidc,
