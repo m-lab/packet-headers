@@ -5,7 +5,7 @@ go 1.20
 require (
 	github.com/google/gopacket v1.1.19
 	github.com/m-lab/go v0.1.66
-	github.com/m-lab/tcp-info v1.10.0
+	github.com/m-lab/tcp-info v1.10.1
 	github.com/prometheus/client_golang v1.13.0
 	github.com/spf13/afero v1.9.2
 )
